@@ -1,0 +1,20 @@
+# app/auth/schemas.py
+import uuid
+from typing import Optional
+from fastapi_users import schemas
+
+
+class UserRead(schemas.BaseUser[uuid.UUID]):
+    first_name: Optional[str] = None  # add your own fields if desired
+
+
+class UserCreate(schemas.BaseUserCreate):
+    first_name: Optional[str] = None
+
+
+class UserUpdate(schemas.BaseUserUpdate):
+    first_name: Optional[str] = None
+
+
+class UserDB(UserRead, schemas.BaseUserDB[uuid.UUID]):
+    pass
