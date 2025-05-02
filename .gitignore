@@ -1,6 +1,85 @@
+
+# Byte-compiled / optimized / DLL files
+__pycache__/             # Python cache :contentReference[oaicite:0]{index=0}
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.venv/                   # Recommended name for venv :contentReference[oaicite:1]{index=1}
+env/
+venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+*.whl
+
+# Installer logs
+pip-log.txt             # pip 1.x logs
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter notebooks
+.ipynb_checkpoints/      # Notebook checkpoints :contentReference[oaicite:2]{index=2}
+
+# pyenv
+.python-version
+
+# Type checker caches
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# IDE / Editor configs
+.vscode/                # VS Code
+.idea/                  # IntelliJ/PyCharm
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS files
+.DS_Store               # macOS :contentReference[oaicite:3]{index=3}
+Thumbs.db               # Windows
+
+# Logs and temp files
 *.log
+logs/
+tmp/
+temp/
 *.tmp
-*.swp
-.DS_Store
-node_modules/
+
+# Local environment variables
+.env                     # dotenv files
+.env.*.local
+
+# Docker overrides
+docker-compose.override.yml
+
+# Database files
+*.sqlite3
+
+# Miscellaneous
 __pycache__/
+*.pem                    # private keys
+

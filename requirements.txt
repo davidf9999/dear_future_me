@@ -1,0 +1,37 @@
+# Web framework & ASGI server
+fastapi>=0.95.0
+uvicorn[standard]>=0.21.1
+
+# Authentication
+fastapi-users[sqlalchemy]>=11.0.0
+sqlalchemy>=1.4
+
+# Database & ORM (for demo you might swap to SQLite)
+databases[sqlite]>=0.6.0
+
+# Configuration
+pydantic-settings>=2.0
+
+# LLM orchestration & gateways
+langchain>=0.0.300
+openrouter>=0.1.0
+openai>=0.27.0
+
+# Vector store & RAG toolkit
+chromadb>=0.3.23
+llama-index>=0.5.7
+
+# Speech support
+openai-whisper>=1.1.10
+coqui-tts>=0.0.64             # Coqui Text-to-Speech
+
+# Risk classification
+transformers>=4.30.0
+torch>=2.1.0
+sentence-transformers>=2.2.2  # for embedding & HF suicide model
+
+# Notifications
+twilio>=8.0.0
+
+# Env var loader
+python-dotenv>=1.0.0
