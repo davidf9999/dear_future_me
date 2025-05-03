@@ -3,17 +3,21 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import asyncio
 
-from app.core.settings import settings
+from app.core.settings import get_settings, Settings
 from app.api.orchestrator import Orchestrator, get_orchestrator
 from fastapi_users import FastAPIUsers
 from app.auth.router import fastapi_users
+
+_cfg: Settings = get_settings()
+_MAX_MSG = _cfg.MAX_MESSAGE_LENGTH
+_ASR_TIMEOUT = _cfg.ASR_TIMEOUT_SECONDS
 
 router = APIRouter(tags=["chat"])
 
 
 # Pydantic model for text chat request
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=settings.MAX_MESSAGE_LENGTH)
+    message: str = Field(..., min_length=1, max_length=_MAX_MSG)
 
 
 # Pydantic model for text chat response
@@ -38,7 +42,7 @@ async def chat_text(
     # Enforce a timeout for the orchestrator call
     try:
         reply = await asyncio.wait_for(
-            orchestrator.answer(req.message), timeout=settings.ASR_TIMEOUT_SECONDS
+            orchestrator.answer(req.message), timeout=_ASR_TIMEOUT
         )
     except asyncio.TimeoutError:
         raise HTTPException(
