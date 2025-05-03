@@ -38,7 +38,7 @@ async def get_user_manager(user_db=Depends(get_user_db)):
 
 
 # 4) Define your authentication backend
-bearer_transport = BearerTransport(tokenUrl="/auth/jwt/login")
+bearer_transport = BearerTransport(tokenUrl="/auth/login")
 
 
 # 5) Define your JWT strategy
