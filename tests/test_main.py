@@ -1,12 +1,12 @@
 # tests/test_main.py
 import pytest
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from app.main import app
 
+client = TestClient(app)
 
-@pytest.mark.asyncio
-async def test_ping():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        res = await ac.get("/ping")
+
+def test_ping():
+    res = client.get("/ping")
     assert res.status_code == 200
     assert res.json() == {"ping": "pong"}
