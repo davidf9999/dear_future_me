@@ -25,11 +25,16 @@ from app.auth.schemas import (
 async def get_user_db(session=Depends(get_async_session)):
     yield SQLAlchemyUserDatabase(session, UserTable)
 
-
 # 2) Define your user manager
 class UserManager(BaseUserManager):
     reset_password_token_secret = settings.SECRET_KEY
     verification_token_secret = settings.SECRET_KEY
+
+    def parse_id(self, value: str):
+        """Parse a string value into a UUID."""
+        import uuid
+        return uuid.UUID(value)
+
 
 
 # 3) Dependency that yields the user manager
