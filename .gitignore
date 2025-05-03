@@ -1,6 +1,6 @@
 
 # Byte-compiled / optimized / DLL files
-__pycache__/             # Python cache
+__pycache__/
 *.py[cod]
 *$py.class
 
@@ -23,7 +23,7 @@ eggs/
 *.whl
 
 # Installer logs
-pip-log.txt             # pip 1.x logs
+pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage
@@ -40,7 +40,7 @@ coverage.xml
 .hypothesis/
 
 # Jupyter notebooks
-.ipynb_checkpoints/      # Notebook checkpoints
+.ipynb_checkpoints/
 
 # pyenv
 .python-version
@@ -51,16 +51,16 @@ coverage.xml
 .pyre/
 
 # IDE / Editor configs
-.vscode/                # VS Code
-.idea/                  # IntelliJ/PyCharm
+.vscode/
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 
 # OS files
-.DS_Store               # macOS
-Thumbs.db               # Windows
+.DS_Store
+Thumbs.db
 
 # Logs and temp files
 *.log
@@ -70,7 +70,7 @@ temp/
 *.tmp
 
 # Local environment variables
-.env                     # dotenv files
+.env
 .env.*.local
 
 # Docker overrides
