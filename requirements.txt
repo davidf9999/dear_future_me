@@ -14,8 +14,12 @@ pydantic-settings>=2.0
 
 # LLM orchestration & gateways
 langchain>=0.0.300
+langchain-core>=0.3.25
+langchain-community>=0.1.0
+langchain-openai>=0.1.0
+langchain-chroma>=0.2.3 
 openrouter>=0.1.0
-openai>=0.27.0
+# openai>=0.27.0
 
 # Vector store & RAG toolkit
 chromadb>=0.3.23

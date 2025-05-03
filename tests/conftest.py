@@ -16,3 +16,9 @@ def set_test_env():
 def initialize_db():
     """Initialize the database before running tests."""
     asyncio.run(init_db())
+
+
+@pytest.fixture(autouse=True)
+def set_env_vars(monkeypatch):
+    # Provide a dummy key so OpenAIEmbeddings init doesn’t error
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-123")
