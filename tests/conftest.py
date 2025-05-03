@@ -25,12 +25,7 @@ def set_env_vars(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-123")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True, scope="session")
 def initialize_test_db():
-    settings = get_settings()
-    if (
-        "test.db" not in settings.DATABASE_URL
-        and ":memory:" not in settings.DATABASE_URL
-    ):
-        pytest.skip("Skipping DB init for non-test database")
+    """Always drop & recreate tables in the test database."""
     asyncio.run(init_db())

@@ -1,5 +1,6 @@
 # app/auth/router.py
 
+import uuid
 from fastapi import Depends
 from fastapi_users import FastAPIUsers
 from fastapi_users.authentication import AuthenticationBackend, JWTStrategy
@@ -36,6 +37,9 @@ class UserManager(BaseUserManager):
         cfg = Settings()
         self.reset_password_token_secret = cfg.SECRET_KEY
         self.verification_token_secret = cfg.SECRET_KEY
+
+    def parse_id(self, value: str) -> uuid.UUID:
+        return uuid.UUID(value)
 
 
 # 3) User manager dependency
