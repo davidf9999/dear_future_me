@@ -8,7 +8,7 @@ __pycache__/             # Python cache
 *.so
 
 # Virtual environments
-.venv/                   # Recommended name for venv
+.venv/
 env/
 venv/
 ENV/
