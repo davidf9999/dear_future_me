@@ -24,8 +24,8 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-
-settings = Settings()  # Now importable as app.core.settings.settings
-if __name__ == "__main__":
-    print("Loaded DATABASE_URL =", settings.DATABASE_URL)
-    print("Loaded SECRET_KEY length =", len(settings.SECRET_KEY))
+def get_settings() -> Settings:
+    """
+    EVERY consumer must call *this* to load current env vars (no caching).
+    """
+    return Settings()
