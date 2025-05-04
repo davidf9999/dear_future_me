@@ -2,6 +2,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from pydantic_settings import BaseSettings, Field
+from pydantic_settings import BaseSettings, Field
 
 client = TestClient(app)
 

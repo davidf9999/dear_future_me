@@ -1,7 +1,6 @@
 # app/core/config.py
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
@@ -14,6 +13,7 @@ class Settings(BaseSettings):
     )
 
     class Config:
+        extra = "ignore"  # ← swallow any other env vars (DATABASE_URL, SECRET_KEY,…)
         env_file = ".env"
         env_file_encoding = "utf-8"
 
