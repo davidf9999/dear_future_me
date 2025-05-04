@@ -1,12 +1,11 @@
 # app/api/orchestrator.py
 
 from fastapi import Request
-from langchain_core.prompts import PromptTemplate
-from langchain.chains.llm import LLMChain
 from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_community.chat_models import ChatOpenAI
 from app.core.settings import get_settings
 from app.rag.processor import DocumentProcessor
+from langchain_core.prompts import PromptTemplate
 
 # Load system prompt template
 SYSTEM_PROMPT = PromptTemplate.from_file("prompts/system.md")
@@ -61,15 +60,16 @@ class Orchestrator:
         except Exception:
             pass
 
-        # Build the RetrievalQA chain
+        # Build the RetrievalQA chain with system prompt
         try:
-            self.qa_chain = RetrievalQA.from_chain_type(
+            self.chain = RetrievalQA.from_chain_type(
                 llm=ChatOpenAI(
                     model_name=cfg.LLM_MODEL,
                     temperature=cfg.LLM_TEMPERATURE,
                 ),
                 retriever=retriever,
                 chain_type="stuff",
+                combine_prompt=SYSTEM_PROMPT,
             )
         except Exception:
 
@@ -77,24 +77,15 @@ class Orchestrator:
                 async def arun(self, q: str) -> str:
                     raise RuntimeError("chain not available")
 
-            self.qa_chain = _StubChain()
-
-        # Wrap QA chain's LLM with our system prompt
-        llm = getattr(self.qa_chain, "llm", ChatOpenAI())
-        self.chain = LLMChain(
-            llm=llm,
-            prompt=SYSTEM_PROMPT,
-        )
+            self.chain = _StubChain()
 
     async def answer(self, query: str) -> str:
         """
         Produce an answer using arun; fallback to echo on error.
         """
         try:
-            # Attempt async run on the chain
             return await self.chain.arun(query)
         except Exception:
-            # Fallback to simple echo
             return f"Echo: {query}"
 
 
