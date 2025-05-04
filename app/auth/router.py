@@ -77,3 +77,4 @@ fastapi_users = FastAPIUsers(
 # 8) Routers
 auth_router = fastapi_users.get_auth_router(auth_backend)
 register_router = fastapi_users.get_register_router(UserRead, UserCreate)
+register_router.routes[0].status_code = 201  # Set registration route to return 201

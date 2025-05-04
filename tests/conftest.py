@@ -30,6 +30,11 @@ def get_settings() -> Settings:
 @pytest.fixture(autouse=True)
 async def clear_users_table():
     async for session in get_async_session():
-        await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
-        await session.commit()
-        break
+        try:
+            await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
+            await session.commit()
+        except Exception as e:
+            print(f"Error clearing users table: {e}")
+            await session.rollback()
+        finally:
+            break

@@ -5,12 +5,25 @@ from app.main import app
 client = TestClient(app)
 
 
+import uuid
+
 def test_register_and_login():
+    # Generate a unique email
+    unique_email = f"test_{uuid.uuid4()}@example.com"
+    
     # Register
     res = client.post(
-        "/auth/register", json={"email": "a@b.com", "password": "secret"}
+        "/auth/register", json={"email": unique_email, "password": "secret"}
     )
-    assert res.status_code == 201
+    print(f"Registration Response Status Code: {res.status_code}")
+    print(f"Registration Response Content: {res.json()}")
+    assert res.status_code == 201, f"Registration failed: {res.json()}"
+    
+    # Login
+    login_res = client.post(
+        "/auth/login", data={"username": unique_email, "password": "secret"}
+    )
+    assert "access_token" in login_res.json(), f"Login failed: {login_res.json()}"
     # Login
     res = client.post(
         "/auth/login", data={"username": "a@b.com", "password": "secret"}

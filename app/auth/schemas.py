@@ -12,6 +12,9 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
 class UserCreate(schemas.BaseUserCreate):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    is_active: Optional[bool] = True
+    is_superuser: Optional[bool] = False
+    is_verified: Optional[bool] = False
 
 
 class UserUpdate(schemas.BaseUserUpdate):
