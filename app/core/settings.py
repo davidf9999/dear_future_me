@@ -12,8 +12,12 @@ class Settings(BaseSettings):
     ASR_TIMEOUT_SECONDS: float = 15.0
 
     # Vector store / RAG
-    CHROMA_COLLECTION: str = "therapy"
     CHROMA_DIR: str = "./chroma_data"
+
+    # RAG namespaces
+    CHROMA_NAMESPACE_THEORY: str = "theory"
+    CHROMA_NAMESPACE_PLAN: str = "personal_plan"
+    CHROMA_NAMESPACE_SESSION: str = "session_data"
 
     # LLM
     OPENAI_API_KEY: str

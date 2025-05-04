@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from app.auth.router import auth_router, register_router, fastapi_users
 from app.auth.schemas import UserRead, UserUpdate
 from app.api.chat import router as chat_router
+from app.api.rag import router as rag_router
 
 app = FastAPI(title="Dear Future Me API")
 
@@ -19,6 +20,8 @@ app.include_router(
 )
 
 app.include_router(chat_router, prefix="", tags=["chat"])
+app.include_router(rag_router)
+
 
 @app.get("/ping", tags=["health"])
 async def ping():
