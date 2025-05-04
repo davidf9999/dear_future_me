@@ -1,71 +1,89 @@
 # app/cli.py
+"""
+Command‑line interface for Dear Future Me.
+
+• --demo        : run two canned messages
+• --offline     : force stubbed responses (no network)
+The script also auto‑falls back to offline mode if a *real* OPENAI_API_KEY
+is not found.
+"""
+
+from __future__ import annotations
+
 import argparse
 import asyncio
-from app.api.orchestrator import Orchestrator
+import os
+import sys
+import warnings
+
+# Add project root for `python app/cli.py`
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-async def run_interactive():
-    """
-    Interactive CLI: reads user input and prints system replies.
-    """
-    orch = Orchestrator()
-    print("=== Dear Future Me CLI Demo ===")
-    print("(Type 'exit' to quit)")
-    while True:
-        user_input = input("Client: ")
-        if user_input.lower() in ("exit", "quit"):
-            print("Goodbye!")
-            break
-        # Get orchestrator answer
-        try:
-            reply = await orch.answer(user_input)
-        except Exception as e:
-            reply = f"[Error generating reply: {e}]"
-        print(f"System: {reply}\n")
-
-
-def run_demo_sequence(sequence):
-    """
-    Given a list of (speaker, message) pairs, simulate the conversation and return list of responses.
-    """
-    orch = Orchestrator()
-    replies = []
-    for speaker, msg in sequence:
-        # we only process client messages
-        if speaker.lower() == "client":
-            # orchestrator.answer might be async
-            coro = orch.answer(msg)
-            if asyncio.iscoroutine(coro):
-                resp = asyncio.get_event_loop().run_until_complete(coro)
-            else:
-                resp = coro
-            replies.append(("System", resp))
-    return replies
-
-
-def main():
-    parser = argparse.ArgumentParser(description="CLI demo for Dear Future Me")
-    parser.add_argument(
-        "--demo", action="store_true", help="Run a scripted demo conversation"
+# ─── argument parsing ────────────────────────────────────────────────
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="CLI for Dear Future Me")
+    p.add_argument("--demo", action="store_true", help="Run demo conversation")
+    p.add_argument(
+        "--offline",
+        action="store_true",
+        help="Use stubbed replies (no OpenAI, no network)",
     )
-    args = parser.parse_args()
+    return p.parse_args()
 
-    if args.demo:
-        # A simple fake conversation
-        script = [
-            ("Client", "I feel anxious about my upcoming meeting."),
-            ("Client", "I’m not sure how to prepare."),
-        ]
-        responses = run_demo_sequence(script)
-        for (speaker, msg), (_, reply) in zip(script, responses):
-            print(f"{speaker}: {msg}")
-            print(f"System: {reply}\n")
-    else:
-        # interactive mode
+
+# ─── orchestrator selection ──────────────────────────────────────────
+def _get_orchestrator(offline: bool):
+    if offline:
+        # lightweight stub that just echoes
+        class _Dummy:
+            async def answer(self, q: str) -> str:
+                return f"Echo: {q}"
+
+        return _Dummy()
+
+    # real orchestrator (may raise if key invalid)
+    from app.api.orchestrator import Orchestrator
+
+    return Orchestrator()
+
+
+# ─── demo sequence ──────────────────────────────────────────────────
+async def _run_demo(orch) -> None:
+    msgs = [
+        "Hello, I'm feeling a bit anxious today.",
+        "Can you help me understand why?",
+    ]
+    for m in msgs:
+        print(f"Client: {m}")
         try:
-            asyncio.run(run_interactive())
-        except KeyboardInterrupt:
-            print("\nInterrupted. Goodbye!")
+            reply = await orch.answer(m)
+        except Exception as e:  # pylint: disable=broad-except
+            print(f"⚠️  LLM error ({e}). Falling back to offline stub.")
+            orch = _get_orchestrator(offline=True)
+            reply = await orch.answer(m)
+        print(f"System: {reply}")
+
+
+# ─── main ────────────────────────────────────────────────────────────
+def main() -> None:
+    args = _parse_args()
+    if args.demo:
+        # Decide offline/online
+        offline = (
+            args.offline
+            or not os.getenv("OPENAI_API_KEY")
+            or os.getenv("OPENAI_API_KEY") == "test-key"
+        )
+        if offline:
+            warnings.warn("Running demo in OFFLINE mode (no OpenAI).", RuntimeWarning)
+        asyncio.run(_run_demo(_get_orchestrator(offline)))
+    else:
+        print("No --demo flag provided. Nothing to do.")
 
 
 if __name__ == "__main__":

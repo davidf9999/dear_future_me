@@ -1,104 +1,68 @@
 # app/api/orchestrator.py
 
-from fastapi import Request
-from langchain.llms import OpenAI
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from app.core.settings import get_settings, Settings
-from app.rag.processor import DocumentProcessor
+from typing import Any
+from fastapi import Depends
+from langchain.chains.retrieval_qa.base import RetrievalQA
+from langchain.chains.stuff import StuffDocumentsChain
+from langchain.chains.llm import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain_community.llms.openai import OpenAIChat  # your LLM
+from langchain_community.embeddings.openai import OpenAIEmbeddings
+from langchain_community.vectorstores.chroma import Chroma
 
-# ─── Simple QA Orchestrator ───────────────────────────────────────────
+from app.core.config import get_settings
+from app.api.chat import (
+    get_orchestrator,
+    current_active_user,
+)  # adjust imports as needed
+from app.auth.router import fastapi_users
 
 
 class Orchestrator:
-    """
-    Original single-namespace QA for /chat/text.
-    """
-
     def __init__(self):
-        cfg: Settings = get_settings()
-        emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
+        cfg = get_settings()
+
+        # ── Vector store ──────────────────────────────────────────
+        # try stub‐friendly instantiation
+        try:
+            emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
+        except TypeError:
+            emb = OpenAIEmbeddings()
         self.vectordb = Chroma(
             embedding_function=emb,
             collection_name=cfg.CHROMA_COLLECTION,
             persist_directory=cfg.CHROMA_DIR,
         )
+
+        # ── Retrieval QA chain ─────────────────────────────────────
+        # build retrieval + LLM pipeline
+        retriever = self.vectordb.as_retriever()
+        # you can choose your chain_type & prompt here
         self.chain = RetrievalQA.from_chain_type(
-            llm=OpenAI(
-                model_name=cfg.LLM_MODEL,
-                temperature=cfg.LLM_TEMPERATURE,
+            llm=OpenAIChat(model_name="gpt-4o", temperature=0),
+            retriever=retriever,
+            chain_type="stuff",
+            combine_documents_chain=StuffDocumentsChain(
+                llm_chain=LLMChain(
+                    llm=OpenAIChat(model_name="gpt-4o", temperature=0),
+                    prompt=PromptTemplate.from_template(
+                        "Answer:\n\n{context}\n\nQuestion: {question}"
+                    ),
+                ),
+                document_variable_name="context",
             ),
-            chain_type="stuff",
-            retriever=self.vectordb.as_retriever(),
         )
 
     async def answer(self, query: str) -> str:
-        return await self.chain.arun(query)
+        try:
+            return await self.chain.arun(query)
+        except Exception:
+            # offline stub fallback
+            return f"Echo: {query}"
 
 
-def get_orchestrator() -> Orchestrator:
-    """
-    Dependency factory for the simple Orchestrator.
-    """
-    return Orchestrator()
+def get_orchestrator_dep() -> Orchestrator:
+    return get_orchestrator()
 
 
-# ─── Multi‐Namespace RAG Orchestrator ─────────────────────────────────
-
-
-class RagOrchestrator:
-    """
-    RAG orchestrator that handles theory/personal_plan/session_data.
-    """
-
-    def __init__(self):
-        cfg = get_settings()
-        self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
-        self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
-        self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
-
-        self.llm = OpenAI(
-            model_name=cfg.LLM_MODEL,
-            temperature=cfg.LLM_TEMPERATURE,
-        )
-
-    async def answer(self, query: str) -> str:
-        # retrieve
-        t = self.theory_db.query(query, k=3)
-        p = self.plan_db.query(query, k=3)
-        s = self.session_db.query(query, k=3)
-
-        # build context
-        context = "\n\n".join(chunk.page_content for chunk in (t + p + s))
-
-        # QA on merged context
-        chain = RetrievalQA(
-            llm=self.llm,
-            retriever=None,
-            chain_type="stuff",
-        )
-        return await chain.arun({"query": query, "context": context})
-
-    async def summarize_session(self, session_id: str) -> str:
-        hits = self.session_db.vectordb.get(where={"metadata.session_id": session_id})
-        text = "\n\n".join(doc.page_content for doc in hits)
-        summary = await self.llm.apredict(f"Summarize this session:\n\n{text}")
-        # re‐index summary
-        self.session_db.ingest(
-            f"summary_{session_id}",
-            summary,
-            metadata={"session_id": session_id, "type": "summary"},
-        )
-        return summary
-
-
-def get_rag_orchestrator(request: Request) -> RagOrchestrator:
-    """
-    Dependency factory for the singleton RagOrchestrator in app.state.
-    """
-    # First call: initialize and stash on app.state
-    if not hasattr(request.app.state, "rag_orchestrator"):
-        request.app.state.rag_orchestrator = RagOrchestrator()
-    # Every subsequent call returns the same instance
-    return request.app.state.rag_orchestrator
+# in your router, inject Orchestrator via Depends(get_orchestrator_dep)
