@@ -20,18 +20,16 @@ class Orchestrator:
     def __init__(self):
         cfg = get_settings()
 
-        # 1) Embeddings (stub-friendly)
+        # ─── Embeddings ──────────────────────────────────────────────
         try:
-            # From the standalone langchain-openai package
-            from langchain_openai import OpenAIEmbeddings
+            from langchain_openai.embeddings import OpenAIEmbeddings
 
             emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
         except Exception:
             emb = None
 
-        # 2) Vector store (stub-friendly)
+        # ─── Vector store ─────────────────────────────────────────────
         try:
-            # From the standalone langchain-chroma package
             from langchain_chroma import Chroma
 
             self.vectordb = Chroma(
@@ -42,12 +40,10 @@ class Orchestrator:
         except Exception:
             self.vectordb = None
 
-        # 3) Retrieval QA chain (stub-friendly)
+        # ─── Retrieval QA chain ────────────────────────────────────────
         try:
-            from langchain.chains.retrieval_qa.base import RetrievalQA
-
-            # From the langchain-community chat_models
-            from langchain_community.chat_models import ChatOpenAI
+            from langchain.chains import RetrievalQA
+            from langchain_openai.chat_models import ChatOpenAI
 
             retriever = self.vectordb.as_retriever() if self.vectordb else None
             self.chain = RetrievalQA.from_chain_type(
@@ -61,30 +57,31 @@ class Orchestrator:
         except Exception:
 
             class _StubChain:
-                async def arun(self, q: str) -> str:
+                async def ainvoke(self, q: str) -> str:
                     raise RuntimeError("chain not available")
 
             self.chain = _StubChain()
 
     async def answer(self, query: str) -> str:
         try:
-            return await self.chain.arun(query)
+            # Use ainvoke to avoid the arun deprecation
+            return await self.chain.ainvoke(query)
         except Exception:
-            # On real-mode failure, inform rather than echo
             return "I’m sorry, I’m unable to answer that right now. Please try again later."
 
 
 class RagOrchestrator:
     def __init__(self):
-        cfg = get_settings()
+        self.cfg = get_settings()
         from app.rag.processor import DocumentProcessor
 
-        self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
-        self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
-        self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
+        self.theory_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_THEORY)
+        self.plan_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_PLAN)
+        self.session_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_SESSION)
 
     async def summarize_session(self, session_id: str) -> str:
         try:
-            return await self.session_db.qa.arun(session_id)
+            # If you set up a .qa chain on DocumentProcessor, swap in .ainvoke here too.
+            return await self.session_db.qa.ainvoke(session_id)
         except Exception:
             return f"Summary for {session_id}"
