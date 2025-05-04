@@ -1,17 +1,19 @@
 # app/api/orchestrator.py
 
+from fastapi import Request
 from langchain.llms import OpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from app.core.settings import get_settings, Settings
-
 from app.rag.processor import DocumentProcessor
+
+# ─── Simple QA Orchestrator ───────────────────────────────────────────
 
 
 class Orchestrator:
     """
-    Original simple QA orchestrator hitting a single Chroma collection.
+    Original single-namespace QA for /chat/text.
     """
 
     def __init__(self):
@@ -35,55 +37,54 @@ class Orchestrator:
         return await self.chain.arun(query)
 
 
+def get_orchestrator() -> Orchestrator:
+    """
+    Dependency factory for the simple Orchestrator.
+    """
+    return Orchestrator()
+
+
+# ─── Multi‐Namespace RAG Orchestrator ─────────────────────────────────
+
+
 class RagOrchestrator:
     """
-    Multi-namespace RAG orchestrator:
-      - retrieves from theory, personal_plan, and session_data
-      - merges context into a single prompt
-      - answers via the LLM
-      - can summarize a session and re-index the summary
+    RAG orchestrator that handles theory/personal_plan/session_data.
     """
 
     def __init__(self):
         cfg = get_settings()
-        # Three distinct vector stores (namespaces)
         self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
         self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
         self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
 
-        # Single LLM for both QA and summary
         self.llm = OpenAI(
             model_name=cfg.LLM_MODEL,
             temperature=cfg.LLM_TEMPERATURE,
         )
 
     async def answer(self, query: str) -> str:
-        # 1) Retrieve top-3 chunks from each namespace
-        theory_chunks = self.theory_db.query(query, k=3)
-        plan_chunks = self.plan_db.query(query, k=3)
-        session_chunks = self.session_db.query(query, k=3)
+        # retrieve
+        t = self.theory_db.query(query, k=3)
+        p = self.plan_db.query(query, k=3)
+        s = self.session_db.query(query, k=3)
 
-        # 2) Merge into one context
-        all_chunks = theory_chunks + plan_chunks + session_chunks
-        context = "\n\n".join(chunk.page_content for chunk in all_chunks)
+        # build context
+        context = "\n\n".join(chunk.page_content for chunk in (t + p + s))
 
-        # 3) Run a simple RetrievalQA chain on the merged context
+        # QA on merged context
         chain = RetrievalQA(
             llm=self.llm,
-            retriever=None,  # we already retrieved
+            retriever=None,
             chain_type="stuff",
         )
         return await chain.arun({"query": query, "context": context})
 
     async def summarize_session(self, session_id: str) -> str:
-        # 1) Fetch all docs for this session
         hits = self.session_db.vectordb.get(where={"metadata.session_id": session_id})
         text = "\n\n".join(doc.page_content for doc in hits)
-
-        # 2) Ask the LLM to summarize
-        summary = await self.llm.apredict(f"Summarize the following session:\n\n{text}")
-
-        # 3) Index the summary back into session_data namespace
+        summary = await self.llm.apredict(f"Summarize this session:\n\n{text}")
+        # re‐index summary
         self.session_db.ingest(
             f"summary_{session_id}",
             summary,
@@ -92,8 +93,8 @@ class RagOrchestrator:
         return summary
 
 
-def get_orchestrator() -> RagOrchestrator:
+def get_rag_orchestrator(request: Request) -> RagOrchestrator:
     """
-    FastAPI dependency factory for RagOrchestrator.
+    Dependency factory for the singleton RagOrchestrator in app.state.
     """
-    return RagOrchestrator()
+    return request.app.state.rag_orchestrator

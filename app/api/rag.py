@@ -1,7 +1,7 @@
 # app/api/rag.py
 
 from fastapi import APIRouter, Depends, UploadFile, Form, HTTPException, status
-from app.api.orchestrator import RagOrchestrator, get_orchestrator
+from app.api.orchestrator import RagOrchestrator, get_rag_orchestrator
 from app.rag.processor import DocumentProcessor
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -18,9 +18,6 @@ async def ingest_document(
     text: str = Form(None),
     file: UploadFile = None,
 ):
-    """
-    Ingest raw text or an uploaded file into the specified namespace.
-    """
     if file:
         raw = (await file.read()).decode("utf-8")
     elif text:
@@ -43,11 +40,7 @@ async def ingest_document(
 )
 async def finalize_session(
     session_id: str,
-    orchestrator: RagOrchestrator = Depends(get_orchestrator),
+    orchestrator: RagOrchestrator = Depends(get_rag_orchestrator),
 ):
-    """
-    Summarize all `session_data` chunks for `session_id`,
-    index the summary back into session_data, and return it.
-    """
     summary = await orchestrator.summarize_session(session_id)
     return {"session_id": session_id, "summary": summary}

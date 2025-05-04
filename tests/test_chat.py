@@ -1,39 +1,40 @@
-# tests/test_chat.py
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
-def override_orchestrator(monkeypatch):
-    # 1) Ensure OPENAI_API_KEY is set so Orchestrator.__init__ won't blow up:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key-123")
-
-    # 2) Create a dummy orchestrator
+def override_orch(monkeypatch):
+    # Dummy orchestrator for chat
     class DummyOrch:
-        async def answer(self, query: str) -> str:
-            return "Echo: " + query
+        async def answer(self, q):
+            return "Echo: " + q
 
-    # 3) Override the FastAPI dependency
     from app.api.chat import get_orchestrator
 
     app.dependency_overrides[get_orchestrator] = lambda: DummyOrch()
 
+    # Bypass auth
+    from app.auth.router import fastapi_users
 
-def test_text_chat_authenticated():
-    client = TestClient(app)
-    # Register & login to get JWT token…
+    app.dependency_overrides[fastapi_users.current_user(active=True)] = lambda: type(
+        "U", (), {"is_active": True}
+    )()
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+def test_text_chat_authenticated(client):
+    # register & login …
     client.post("/auth/register", json={"email": "a@b.com", "password": "secret"})
-    login = client.post(
+    tok = client.post(
         "/auth/login", data={"username": "a@b.com", "password": "secret"}
-    )
-    token = login.json()["access_token"]
-
-    # Now our /chat/text uses DummyOrch, never LangChain!
+    ).json()["access_token"]
     res = client.post(
-        "/chat/text",
-        json={"message": "hello"},
-        headers={"Authorization": f"Bearer {token}"},
+        "/chat/text", json={"message": "hi"}, headers={"Authorization": f"Bearer {tok}"}
     )
     assert res.status_code == 200
-    assert res.json() == {"reply": "Echo: hello"}
+    assert res.json() == {"reply": "Echo: hi"}

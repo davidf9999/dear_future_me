@@ -1,4 +1,5 @@
 # app/api/chat.py
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import asyncio
@@ -15,17 +16,14 @@ _ASR_TIMEOUT = _cfg.ASR_TIMEOUT_SECONDS
 router = APIRouter(tags=["chat"])
 
 
-# Pydantic model for text chat request
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_MAX_MSG)
 
 
-# Pydantic model for text chat response
 class ChatResponse(BaseModel):
     reply: str
 
 
-# Dependency to enforce auth
 current_active_user = fastapi_users.current_user(active=True)
 
 
@@ -39,7 +37,6 @@ async def chat_text(
     req: ChatRequest,
     orchestrator: Orchestrator = Depends(get_orchestrator),
 ):
-    # Enforce a timeout for the orchestrator call
     try:
         reply = await asyncio.wait_for(
             orchestrator.answer(req.message), timeout=_ASR_TIMEOUT
