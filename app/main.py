@@ -42,7 +42,6 @@ app.include_router(
 # Initialize singleton RAG orchestrator on startup
 @app.on_event("startup")
 async def startup_event():
-    # Create a single RagOrchestrator instance and store in app state
     app.state.rag_orchestrator = RagOrchestrator()
 
 

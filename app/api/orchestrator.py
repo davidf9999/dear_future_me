@@ -97,4 +97,8 @@ def get_rag_orchestrator(request: Request) -> RagOrchestrator:
     """
     Dependency factory for the singleton RagOrchestrator in app.state.
     """
+    # First call: initialize and stash on app.state
+    if not hasattr(request.app.state, "rag_orchestrator"):
+        request.app.state.rag_orchestrator = RagOrchestrator()
+    # Every subsequent call returns the same instance
     return request.app.state.rag_orchestrator
