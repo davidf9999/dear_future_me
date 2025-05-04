@@ -1,7 +1,7 @@
 # app/api/orchestrator.py
 
 from fastapi import Request
-from app.core.config import get_settings
+from app.core.settings import get_settings
 
 
 def get_orchestrator() -> "Orchestrator":
