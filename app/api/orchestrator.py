@@ -80,7 +80,8 @@ class Orchestrator:
         try:
             return await self.chain.arun(query)
         except Exception:
-            return f"Echo: {query}"
+            # If anything goes wrong, apologize instead of echoing
+            return "I’m sorry, I’m unable to answer that right now. Please try again later."
 
 
 class RagOrchestrator:
