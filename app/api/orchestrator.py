@@ -3,9 +3,9 @@
 from fastapi import Request
 from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_community.chat_models import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
 from app.core.settings import get_settings
 from app.rag.processor import DocumentProcessor
-from langchain_core.prompts import PromptTemplate
 
 # Load system prompt template
 SYSTEM_PROMPT = PromptTemplate.from_file("prompts/system.md")
