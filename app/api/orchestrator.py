@@ -1,27 +1,15 @@
 # app/api/orchestrator.py
 
 from fastapi import Request
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain_community.chat_models import ChatOpenAI
-from langchain_core.prompts import PromptTemplate
 from app.core.settings import get_settings
-from app.rag.processor import DocumentProcessor
-
-# Load system prompt template
-SYSTEM_PROMPT = PromptTemplate.from_file("prompts/system.md")
+import pathlib
 
 
 def get_orchestrator() -> "Orchestrator":
-    """
-    Dependency factory returning a fresh Orchestrator.
-    """
     return Orchestrator()
 
 
 def get_rag_orchestrator(request: Request) -> "RagOrchestrator":
-    """
-    Dependency factory for the singleton RagOrchestrator in app.state.
-    """
     orch = getattr(request.app.state, "rag_orchestrator", None)
     if orch is None:
         orch = RagOrchestrator()
@@ -30,38 +18,46 @@ def get_rag_orchestrator(request: Request) -> "RagOrchestrator":
 
 
 class Orchestrator:
-    """
-    Manages a retrieval-augmented QA chain with a system prompt.
-    """
-
     def __init__(self):
         cfg = get_settings()
 
-        # Initialize embeddings (stub-friendly)
-        emb = None
+        # Embeddings (stub‐friendly)
         try:
             from langchain_community.embeddings.openai import OpenAIEmbeddings
 
             emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
         except Exception:
-            pass
+            emb = None
 
-        # Initialize vector store and retriever (stub-friendly)
-        retriever = None
+        # Vector store (stub‐friendly)
         try:
             from langchain_community.vectorstores.chroma import Chroma
 
-            vectordb = Chroma(
+            self.vectordb = Chroma(
                 embedding_function=emb,
                 collection_name=cfg.CHROMA_COLLECTION,
                 persist_directory=cfg.CHROMA_DIR,
             )
-            retriever = vectordb.as_retriever()
         except Exception:
-            pass
+            self.vectordb = None
 
-        # Build the RetrievalQA chain with system prompt
+        # Retrieval QA chain with system prompt (stub‐friendly)
         try:
+            from langchain.chains.retrieval_qa.base import RetrievalQA
+            from langchain_community.chat_models import ChatOpenAI
+            from langchain_core.prompts import PromptTemplate
+
+            # Load our system prompt template
+            prompt_path = (
+                pathlib.Path(__file__).parent.parent / "prompts" / "system_prompt.md"
+            )
+            system_prompt = prompt_path.read_text(encoding="utf-8")
+            prompt = PromptTemplate(
+                template=system_prompt,
+                input_variables=["context", "input"],
+            )
+
+            retriever = self.vectordb.as_retriever() if self.vectordb else None
             self.chain = RetrievalQA.from_chain_type(
                 llm=ChatOpenAI(
                     model_name=cfg.LLM_MODEL,
@@ -69,7 +65,8 @@ class Orchestrator:
                 ),
                 retriever=retriever,
                 chain_type="stuff",
-                combine_prompt=SYSTEM_PROMPT,
+                return_source_documents=False,
+                chain_type_kwargs={"prompt": prompt},
             )
         except Exception:
 
@@ -80,9 +77,6 @@ class Orchestrator:
             self.chain = _StubChain()
 
     async def answer(self, query: str) -> str:
-        """
-        Produce an answer using arun; fallback to echo on error.
-        """
         try:
             return await self.chain.arun(query)
         except Exception:
@@ -90,12 +84,10 @@ class Orchestrator:
 
 
 class RagOrchestrator:
-    """
-    Manages separate RAG namespaces for theory, plan, and session.
-    """
-
     def __init__(self):
         cfg = get_settings()
+        from app.rag.processor import DocumentProcessor
+
         self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
         self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
         self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
