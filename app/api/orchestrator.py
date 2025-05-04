@@ -71,12 +71,12 @@ class Orchestrator:
 
 class RagOrchestrator:
     def __init__(self):
-        cfg = get_settings()
+        self.cfg = get_settings()
         from app.rag.processor import DocumentProcessor
 
-        self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
-        self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
-        self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
+        self.theory_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_THEORY)
+        self.plan_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_PLAN)
+        self.session_db = DocumentProcessor(self.cfg.CHROMA_NAMESPACE_SESSION)
 
     async def summarize_session(self, session_id: str) -> str:
         try:
