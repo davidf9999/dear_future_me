@@ -2,7 +2,6 @@
 
 from fastapi import Request
 from app.core.settings import get_settings
-import pathlib
 
 
 def get_orchestrator() -> "Orchestrator":
@@ -21,17 +20,19 @@ class Orchestrator:
     def __init__(self):
         cfg = get_settings()
 
-        # Embeddings (stub‐friendly)
+        # 1) Embeddings (stub-friendly)
         try:
-            from langchain_community.embeddings.openai import OpenAIEmbeddings
+            # From the standalone langchain-openai package
+            from langchain_openai import OpenAIEmbeddings
 
             emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
         except Exception:
             emb = None
 
-        # Vector store (stub‐friendly)
+        # 2) Vector store (stub-friendly)
         try:
-            from langchain_community.vectorstores.chroma import Chroma
+            # From the standalone langchain-chroma package
+            from langchain_chroma import Chroma
 
             self.vectordb = Chroma(
                 embedding_function=emb,
@@ -41,21 +42,12 @@ class Orchestrator:
         except Exception:
             self.vectordb = None
 
-        # Retrieval QA chain with system prompt (stub‐friendly)
+        # 3) Retrieval QA chain (stub-friendly)
         try:
             from langchain.chains.retrieval_qa.base import RetrievalQA
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain_core.prompts import PromptTemplate
 
-            # Load our system prompt template
-            prompt_path = (
-                pathlib.Path(__file__).parent.parent / "prompts" / "system_prompt.md"
-            )
-            system_prompt = prompt_path.read_text(encoding="utf-8")
-            prompt = PromptTemplate(
-                template=system_prompt,
-                input_variables=["context", "input"],
-            )
+            # From the langchain-community chat_models
+            from langchain_community.chat_models import ChatOpenAI
 
             retriever = self.vectordb.as_retriever() if self.vectordb else None
             self.chain = RetrievalQA.from_chain_type(
@@ -65,8 +57,6 @@ class Orchestrator:
                 ),
                 retriever=retriever,
                 chain_type="stuff",
-                return_source_documents=False,
-                chain_type_kwargs={"prompt": prompt},
             )
         except Exception:
 
@@ -80,7 +70,7 @@ class Orchestrator:
         try:
             return await self.chain.arun(query)
         except Exception:
-            # If anything goes wrong, apologize instead of echoing
+            # On real-mode failure, inform rather than echo
             return "I’m sorry, I’m unable to answer that right now. Please try again later."
 
 
