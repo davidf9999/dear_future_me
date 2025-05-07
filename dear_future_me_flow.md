@@ -20,10 +20,12 @@ flowchart TD
     CD["Respond with crisis resources"]
     CE["Retrieve & RAG QA"]
     CF["System reply (≤ 100 words, 1 action)"]
+    FMP["Future Me Profile (persona prompt)"]
 
     CA --> CB
     CB -- Yes --> CC --> CD --> CA
     CB -- No  --> CE --> CF --> CA
+    FMP --> CE
   end
 
   %% ── Bottom: Therapist Review ─────────────────────────────
