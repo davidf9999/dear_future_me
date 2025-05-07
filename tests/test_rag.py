@@ -38,3 +38,18 @@ def test_summarize_session(client):
     res = client.post(f"/rag/session/{sid}/summarize")
     assert res.status_code == 200
     assert res.json()["summary"] == f"SUM for {sid}"
+
+
+def test_ingest_future_me_namespace(client):
+    res = client.post(
+        "/rag/ingest/",
+        data={
+            "namespace": "future_me",
+            "doc_id": "fm1",
+            "text": "My future self is strong.",
+        },
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["namespace"] == "future_me"
+    assert payload["doc_id"] == "fm1"

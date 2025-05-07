@@ -13,7 +13,10 @@ router = APIRouter(prefix="/rag", tags=["rag"])
     response_model=dict,
 )
 async def ingest_document(
-    namespace: str = Form(..., pattern="^(theory|personal_plan|session_data)$"),
+    namespace: str = Form(
+        ...,
+        pattern="^(theory|personal_plan|session_data|future_me)$",  # ← UPDATED
+    ),
     doc_id: str = Form(...),
     text: str = Form(None),
     file: UploadFile = None,

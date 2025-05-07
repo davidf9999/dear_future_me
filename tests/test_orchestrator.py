@@ -66,3 +66,12 @@ async def test_summarize_session_fallback(monkeypatch):
     orch.session_db.qa = BadQA()
 
     assert await orch.summarize_session("sessX") == "Summary for sessX"
+
+
+def test_rag_orchestrator_has_future_db():
+    orch = RagOrchestrator()
+    assert hasattr(orch, "future_db"), "RagOrchestrator must have future_db"
+    # Optionally, check its type:
+    from app.rag.processor import DocumentProcessor
+
+    assert isinstance(orch.future_db, DocumentProcessor)

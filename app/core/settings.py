@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     CHROMA_NAMESPACE_THEORY: str = "theory"
     CHROMA_NAMESPACE_PLAN: str = "personal_plan"
     CHROMA_NAMESPACE_SESSION: str = "session_data"
+    CHROMA_NAMESPACE_FUTURE: str = "future_me"  # ← NEW
 
     # ── LLM Settings ──────────────────────────────────────────────
     OPENAI_API_KEY: str

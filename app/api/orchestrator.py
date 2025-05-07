@@ -1,5 +1,3 @@
-# app/api/orchestrator.py
-
 import logging
 from fastapi import Request
 from app.core.settings import get_settings
@@ -10,6 +8,9 @@ def get_orchestrator() -> "Orchestrator":
 
 
 def get_rag_orchestrator(request: Request) -> "RagOrchestrator":
+    """
+    Returns a singleton RagOrchestrator per app instance.
+    """
     orch = getattr(request.app.state, "rag_orchestrator", None)
     if orch is None:
         orch = RagOrchestrator()
@@ -18,6 +19,11 @@ def get_rag_orchestrator(request: Request) -> "RagOrchestrator":
 
 
 class BranchingChain:
+    """
+    A simple wrapper that either runs crisis_chain or rag_chain
+    depending on detect_risk(query).
+    """
+
     def __init__(self, detect_risk, crisis_chain, rag_chain):
         self.detect_risk = detect_risk
         self.crisis_chain = crisis_chain
@@ -31,10 +37,16 @@ class BranchingChain:
 
 
 class Orchestrator:
+    """
+    Top-level orchestrator for /chat/text:
+      • risk detection → crisis_chain
+      • otherwise → rag_chain (combining theory, plan, session, future_me)
+    """
+
     def __init__(self):
         cfg = get_settings()
 
-        # risk keywords
+        # ── Risk keywords ───────────────────────────────────────────
         self._risk_keywords = [
             "suicide",
             "kill myself",
@@ -46,7 +58,7 @@ class Orchestrator:
             "hopeless",
         ]
 
-        # build crisis chain...
+        # ── Crisis chain ────────────────────────────────────────────
         try:
             from langchain_community.chat_models import ChatOpenAI
             from langchain.chains.retrieval_qa import RetrievalQA
@@ -90,7 +102,7 @@ class Orchestrator:
 
             self._crisis_chain = _Stub()
 
-        # build RAG‐QA chain...
+        # ── RAG‐QA chain with Future-Me ─────────────────────────────
         try:
             from langchain_community.chat_models import ChatOpenAI
             from langchain.chains.retrieval_qa import RetrievalQA
@@ -101,8 +113,30 @@ class Orchestrator:
             )
             from app.rag.processor import DocumentProcessor
 
+            # instantiate all four vector stores
             theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
-            retriever = theory_db.vectordb.as_retriever()
+            plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
+            session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
+            future_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_FUTURE)
+
+            # custom combined retriever
+            class CombinedRetriever:
+                def __init__(self, retrievers):
+                    self.retrievers = retrievers
+
+                def get_relevant_documents(self, query: str):
+                    docs = []
+                    for r in self.retrievers:
+                        docs.extend(r.get_relevant_documents(query))
+                    return docs
+
+            retrievers = [
+                theory_db.vectordb.as_retriever(),
+                plan_db.vectordb.as_retriever(),
+                session_db.vectordb.as_retriever(),
+                future_db.vectordb.as_retriever(),
+            ]
+            combined_retriever = CombinedRetriever(retrievers)
 
             system_md = open("templates/system_prompt.md", encoding="utf-8").read()
             rag_prompt = ChatPromptTemplate.from_messages(
@@ -114,9 +148,10 @@ class Orchestrator:
 
             self._rag_chain = RetrievalQA.create_retrieval_chain(
                 llm=ChatOpenAI(
-                    model_name=cfg.LLM_MODEL, temperature=cfg.LLM_TEMPERATURE
+                    model_name=cfg.LLM_MODEL,
+                    temperature=cfg.LLM_TEMPERATURE,
                 ),
-                retriever=retriever,
+                retriever=combined_retriever,
                 combine_documents_chain_kwargs={"prompt": rag_prompt},
                 return_source_documents=False,
             )
@@ -128,7 +163,7 @@ class Orchestrator:
 
             self._rag_chain = _Stub()
 
-        # single entry‐point so old tests still work
+        # single entry-point
         self.chain = BranchingChain(
             self._detect_risk, self._crisis_chain, self._rag_chain
         )
@@ -145,6 +180,10 @@ class Orchestrator:
 
 
 class RagOrchestrator:
+    """
+    Exposed via /rag/session/{id}/summarize and used as a singleton on app.state.
+    """
+
     def __init__(self):
         cfg = get_settings()
         from app.rag.processor import DocumentProcessor
@@ -152,8 +191,9 @@ class RagOrchestrator:
         self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
         self.plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
         self.session_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_SESSION)
+        self.future_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_FUTURE)
 
-        # install a default summarize‐chain on session_db.qa
+        # install a default summarize-chain on session_db.qa
         try:
             from langchain_community.chat_models import ChatOpenAI
             from langchain.chains.summarize import load_summarize_chain
