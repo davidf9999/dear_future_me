@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI, Depends
 from app.db.init_db import init_db
+from app.core.settings import get_settings
 
 from app.auth.router import auth_router, register_router, fastapi_users
 from app.auth.schemas import UserRead, UserUpdate
@@ -24,11 +25,16 @@ app.include_router(
     tags=["users"],
 )
 
-# Chat endpoints (protected)
-app.include_router(
-    chat_router,
-    dependencies=[Depends(current_active_user)],
-)
+# Chat endpoints (conditionally protected based on demo mode)
+if get_settings().DEMO_MODE:
+    # In demo mode, chat endpoints are public
+    app.include_router(chat_router)
+else:
+    # In normal mode, chat endpoints are protected
+    app.include_router(
+        chat_router,
+        dependencies=[Depends(current_active_user)],
+    )
 
 # RAG ingestion and summarization endpoints
 app.include_router(rag_router)
