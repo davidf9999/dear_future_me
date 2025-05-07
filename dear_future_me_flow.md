@@ -1,9 +1,9 @@
 # Dear Future Me – Runtime Flow
 
 ```mermaid
-flowchart LR
+flowchart TD
 
-  %% ── Left: Onboarding ───────────────────────────────────────
+  %% ── Top: Onboarding ───────────────────────────────────────
   subgraph Onboarding["Therapist Onboarding"]
     direction TB
     OA["Therapist uploads docs"]
@@ -11,7 +11,7 @@ flowchart LR
     OA --> OB
   end
 
-  %% ── Center: Client Chat Loop ───────────────────────────────
+  %% ── Middle: Client Chat Loop ─────────────────────────────
   subgraph ChatLoop["Client Chat Loop"]
     direction TB
     CA["Client message"]
@@ -26,7 +26,7 @@ flowchart LR
     CB -- No  --> CE --> CF --> CA
   end
 
-  %% ── Right: Therapist Review ────────────────────────────────
+  %% ── Bottom: Therapist Review ─────────────────────────────
   subgraph Review["Therapist Review"]
     direction TB
     RA["Therapist calls /rag/session/{id}/summarize"]
@@ -34,8 +34,8 @@ flowchart LR
     RA --> RB
   end
 
-  %% ── Cross-column flows ───────────────────────────────────────
+  %% ── Cross-stage links ────────────────────────────────────
   OB --> CA
   CF --> RA
   RB --> OB
-  RB -.-> OA
+  RB --> OA
