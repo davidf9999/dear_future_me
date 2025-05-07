@@ -1,19 +1,27 @@
-# app/api/chat.py
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import asyncio
 
-from app.core.settings import get_settings, Settings
-from app.api.orchestrator import Orchestrator, get_orchestrator
+from app.core.settings import get_settings
+from app.api.orchestrator import get_orchestrator, Orchestrator
 from fastapi_users import FastAPIUsers
 from app.auth.router import fastapi_users
 
-_cfg: Settings = get_settings()
-_MAX_MSG = _cfg.MAX_MESSAGE_LENGTH
-_ASR_TIMEOUT = _cfg.ASR_TIMEOUT_SECONDS
+# Load configuration
+cfg = get_settings()
 
-router = APIRouter(tags=["chat"])
+# Limits from settings
+_MAX_MSG = cfg.MAX_MESSAGE_LENGTH
+_ASR_TIMEOUT = cfg.ASR_TIMEOUT_SECONDS
+
+# Dependency for auth
+current_active_user = fastapi_users.current_user(active=True)
+
+# In demo mode, skip auth; otherwise require active user
+router = APIRouter(
+    tags=["chat"],
+    dependencies=[] if cfg.DEMO_MODE else [Depends(current_active_user)],
+)
 
 
 class ChatRequest(BaseModel):
@@ -24,22 +32,23 @@ class ChatResponse(BaseModel):
     reply: str
 
 
-current_active_user = fastapi_users.current_user(active=True)
-
-
 @router.post(
     "/chat/text",
     response_model=ChatResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(current_active_user)],
 )
 async def chat_text(
     req: ChatRequest,
     orchestrator: Orchestrator = Depends(get_orchestrator),
 ):
+    """
+    Accepts a user message, routes through the Orchestrator (crisis vs RAG),
+    and returns a single reply.
+    """
     try:
         reply = await asyncio.wait_for(
-            orchestrator.answer(req.message), timeout=_ASR_TIMEOUT
+            orchestrator.answer(req.message),
+            timeout=_ASR_TIMEOUT,
         )
     except asyncio.TimeoutError:
         raise HTTPException(

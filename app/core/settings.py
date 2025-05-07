@@ -1,9 +1,10 @@
 # app/core/settings.py
-
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    DEMO_MODE: bool = Field(False, env="DEMO_MODE")
     # ── Core & Auth ───────────────────────────────────────────────
     DATABASE_URL: str
     SECRET_KEY: str
