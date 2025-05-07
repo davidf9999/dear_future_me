@@ -5,7 +5,7 @@ flowchart LR
   subgraph Onboarding["Therapist Onboarding"]
     direction TB
     OA["Therapist uploads docs"]
-    OB["Index into Chroma: theory, plan, session"]
+    OB["Index into RAG store: theory, plan, session"]
     OA --> OB
   end
 
@@ -27,10 +27,8 @@ flowchart LR
   %% ── Right: Therapist Review ────────────────────────────────
   subgraph Review["Therapist Review"]
     direction TB
-    RA["Therapist calls  
-         /rag/session/{id}/summarize"]
-    RB["Review summary &  
-         update docs"]
+    RA["Therapist calls /rag/session/{id}/summarize"]
+    RB["Review summary & update docs"]
     RA --> RB
   end
 
