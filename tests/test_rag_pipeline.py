@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
+from app.main import app, current_active_user
 from app.rag.processor import DocumentProcessor
 from app.api.orchestrator import (
     RagOrchestrator,
@@ -8,7 +8,6 @@ from app.api.orchestrator import (
     Orchestrator,
     get_orchestrator,
 )
-from app.api.chat import current_active_user
 
 
 # ─── Fixture: TestClient ─────────────────────────────────────────────
