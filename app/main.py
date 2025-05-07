@@ -6,8 +6,10 @@ from app.db.init_db import init_db
 from app.auth.router import auth_router, register_router, fastapi_users
 from app.auth.schemas import UserRead, UserUpdate
 
-from app.api.chat import router as chat_router, current_active_user, get_orchestrator
+from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router, get_rag_orchestrator, RagOrchestrator
+
+current_active_user = fastapi_users.current_user(active=True)
 
 app = FastAPI(title="Dear Future Me API")
 

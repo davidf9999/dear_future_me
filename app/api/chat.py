@@ -4,8 +4,6 @@ import asyncio
 
 from app.core.settings import get_settings
 from app.api.orchestrator import get_orchestrator, Orchestrator
-from fastapi_users import FastAPIUsers
-from app.auth.router import fastapi_users
 
 # Load configuration
 cfg = get_settings()
@@ -14,14 +12,8 @@ cfg = get_settings()
 _MAX_MSG = cfg.MAX_MESSAGE_LENGTH
 _ASR_TIMEOUT = cfg.ASR_TIMEOUT_SECONDS
 
-# Dependency for auth
-current_active_user = fastapi_users.current_user(active=True)
-
-# In demo mode, skip auth; otherwise require active user
-router = APIRouter(
-    tags=["chat"],
-    dependencies=[] if cfg.DEMO_MODE else [Depends(current_active_user)],
-)
+# Router without auth dependency
+router = APIRouter(tags=["chat"])
 
 
 class ChatRequest(BaseModel):
