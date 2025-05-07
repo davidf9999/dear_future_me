@@ -17,7 +17,7 @@ flowchart LR
     E["Log warning & alert therapist"]
     F["Respond with crisis resources"]
     G["Retrieve & RAG QA"]
-    H["System reply (<= 100 words, 1 action)"]
+    H["System reply (≤ 100 words, 1 action)"]
 
     C --> D
     D -- Yes --> E --> F --> C
@@ -36,4 +36,4 @@ flowchart LR
   B --> C
   H --> I
   J --> B
-  J -.-> A      %% dotted loop back to onboarding
+  J -.-> A
