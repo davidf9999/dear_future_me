@@ -1,3 +1,5 @@
+# Dear Future Me – Runtime Flow
+
 ```mermaid
 flowchart LR
 
@@ -20,8 +22,8 @@ flowchart LR
     CF["System reply (≤ 100 words, 1 action)"]
 
     CA --> CB
-    CB -- "Yes" --> CC --> CD --> CA
-    CB -- "No"  --> CE --> CF --> CA
+    CB -- Yes --> CC --> CD --> CA
+    CB -- No  --> CE --> CF --> CA
   end
 
   %% ── Right: Therapist Review ────────────────────────────────
