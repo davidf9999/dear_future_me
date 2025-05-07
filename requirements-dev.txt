@@ -14,3 +14,6 @@ httpx>=0.24.0
 
 # Git hooks
 pre-commit>=2.20.0
+
+# Mermaid
+pyppeteer 
