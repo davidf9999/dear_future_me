@@ -4,36 +4,38 @@ flowchart LR
   %% ── Left: Onboarding ───────────────────────────────────────
   subgraph Onboarding["Therapist Onboarding"]
     direction TB
-    A["Therapist uploads docs"]
-    B["Index into Chroma: theory, plan, session"]
-    A --> B
+    OA["Therapist uploads docs"]
+    OB["Index into Chroma: theory, plan, session"]
+    OA --> OB
   end
 
   %% ── Center: Client Chat Loop ───────────────────────────────
   subgraph ChatLoop["Client Chat Loop"]
     direction TB
-    C["Client message"]
-    D{"Contains self-harm keywords?"}
-    E["Log warning & alert therapist"]
-    F["Respond with crisis resources"]
-    G["Retrieve & RAG QA"]
-    H["System reply (≤ 100 words, 1 action)"]
+    CA["Client message"]
+    CB{"Contains self-harm keywords?"}
+    CC["Log warning & alert therapist"]
+    CD["Respond with crisis resources"]
+    CE["Retrieve & RAG QA"]
+    CF["System reply (≤ 100 words, 1 action)"]
 
-    C --> D
-    D -- Yes --> E --> F --> C
-    D -- No  --> G --> H --> C
+    CA --> CB
+    CB -- "Yes" --> CC --> CD --> CA
+    CB -- "No"  --> CE --> CF --> CA
   end
 
   %% ── Right: Therapist Review ────────────────────────────────
   subgraph Review["Therapist Review"]
     direction TB
-    I["Therapist calls /rag/session/{id}/summarize"]
-    J["Review summary & update docs"]
-    I --> J
+    RA["Therapist calls  
+         /rag/session/{id}/summarize"]
+    RB["Review summary &  
+         update docs"]
+    RA --> RB
   end
 
-  %% ── Cross-column flows ──────────────────────────────────────
-  B --> C
-  H --> I
-  J --> B
-  J -.-> A
+  %% ── Cross-column flows ───────────────────────────────────────
+  OB --> CA
+  CF --> RA
+  RB --> OB
+  RB -.-> OA
