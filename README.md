@@ -84,11 +84,17 @@ cd dear_future_me
 cp .env.example .env
 # Edit .env to set SECRET_KEY, DATABASE_URL, OPENAI_API_KEY, etc.
 
-# Start services
+# Start server locally
+uvicorn app.main:app --reload
+
+# Or, start services via Docker Compose
 docker-compose up --build -d
 
 # Check health
 curl http://localhost:8000/ping    # {"ping":"pong"}
+
+# Access the API docs, to see what endpoints exist and experiment with using them
+http://localhost:8000/docs
 ```
 
 ---

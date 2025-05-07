@@ -1,8 +1,8 @@
 # app/rag/processor.py
 
 from langchain.schema import Document
-from langchain_community.embeddings.openai import OpenAIEmbeddings
-from langchain_community.vectorstores.chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
 
 from app.core.settings import get_settings
 

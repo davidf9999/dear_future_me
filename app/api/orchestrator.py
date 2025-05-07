@@ -2,6 +2,17 @@ import logging
 from fastapi import Request
 from app.core.settings import get_settings
 
+from langchain_openai import ChatOpenAI
+
+from langchain.chains import RetrievalQA
+
+from langchain.prompts import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+)
+from app.rag.processor import DocumentProcessor
+from langchain.chains.summarize import load_summarize_chain
 
 def get_orchestrator() -> "Orchestrator":
     return Orchestrator()
@@ -60,15 +71,6 @@ class Orchestrator:
 
         # ── Crisis chain ────────────────────────────────────────────
         try:
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain.chains.retrieval_qa import RetrievalQA
-            from langchain.prompts import (
-                ChatPromptTemplate,
-                SystemMessagePromptTemplate,
-                HumanMessagePromptTemplate,
-            )
-            from app.rag.processor import DocumentProcessor
-
             plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
             retriever = plan_db.vectordb.as_retriever()
 
@@ -104,15 +106,6 @@ class Orchestrator:
 
         # ── RAG‐QA chain with Future-Me ─────────────────────────────
         try:
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain.chains.retrieval_qa import RetrievalQA
-            from langchain.prompts import (
-                ChatPromptTemplate,
-                SystemMessagePromptTemplate,
-                HumanMessagePromptTemplate,
-            )
-            from app.rag.processor import DocumentProcessor
-
             # instantiate all four vector stores
             theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
             plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
@@ -195,9 +188,6 @@ class RagOrchestrator:
 
         # install a default summarize-chain on session_db.qa
         try:
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain.chains.summarize import load_summarize_chain
-
             chain = load_summarize_chain(
                 llm=ChatOpenAI(
                     model_name=cfg.LLM_MODEL,
