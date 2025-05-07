@@ -1,21 +1,22 @@
 ```mermaid
 flowchart LR
-  %% ┌─────────────────────────────────────────────┐
-  %% │  Therapist Onboarding                      │
-  %% └─────────────────────────────────────────────┘
-  subgraph Onboarding
+  %% ┌───────────────────────────┐    ┌───────────────────────────┐    ┌───────────────────────────┐
+  %% │  Therapist Onboarding     │    │  Client Chat Loop         │    │  Therapist Review         │
+  %% └───────────────────────────┘    └───────────────────────────┘    └───────────────────────────┘
+
+  %% Left column
+  subgraph Onboarding["Therapist Onboarding"]
     A["Therapist uploads docs"]
     B["Index into Chroma\nnamespaces: theory, plan, session"]
+    A --> B
   end
 
-  %% ┌─────────────────────────────────────────────┐
-  %% │  Client Chat Loop                          │
-  %% └─────────────────────────────────────────────┘
-  subgraph ChatLoop
+  %% Center column
+  subgraph ChatLoop["Client Chat Loop"]
     C["Client message"]
     D{"Contains self-harm\nkeywords?"}
-    E["Log warning & alert therapist"]
-    F["Respond with crisis resources"]
+    E["Log warning\n& alert therapist"]
+    F["Respond with\ncrisis resources"]
     G["Retrieve & RAG QA"]
     H["System reply\n(≤100 words, 1 action)"]
 
@@ -29,19 +30,14 @@ flowchart LR
     H --> C
   end
 
-  %% ┌─────────────────────────────────────────────┐
-  %% │  Therapist Review                          │
-  %% └─────────────────────────────────────────────┘
-  subgraph Review
+  %% Right column
+  subgraph Review["Therapist Review"]
     I["Therapist calls\n/rag/session/{id}/summarize"]
     J["Review summary &\nupdate docs"]
+    I --> J
   end
 
-  %% ↘ Onboarding → Chat
+  %% Cross-column connections
   B --> C
-
-  %% ↘ Chat → Review
   H --> I
-
-  %% ↘ Review → Onboarding
   J --> B
