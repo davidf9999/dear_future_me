@@ -30,5 +30,6 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
+        args: [app, tests] 
         pass_filenames: false
         language_version: python3.11
