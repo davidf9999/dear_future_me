@@ -1,8 +1,8 @@
 # app/rag/processor.py
 
 from langchain.schema import Document
-from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 
 from app.core.settings import get_settings
 
@@ -23,9 +23,10 @@ class DocumentProcessor:
     def ingest(self, doc_id: str, text: str, metadata: dict | None = None) -> None:
         """Ingest a piece of text under doc_id."""
         documents = [Document(page_content=text, metadata=metadata or {})]
-        self.vectordb.add_documents(documents=documents, ids=[doc_id])  # Use doc_id here
+        self.vectordb.add_documents(
+            documents=documents, ids=[doc_id]
+        )  # Use doc_id here
         self.vectordb.persist()
-
 
     def query(self, query: str, k: int = 5) -> list[Document]:
         """Return up to k matching Documents for `query`."""

@@ -2,19 +2,15 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from app.main import (
+from langchain.schema import Document  # Add this import at the top of your test file
+
+from app.api.orchestrator import Orchestrator, RagOrchestrator, get_rag_orchestrator
+from app.main import (  # Assuming current_active_user is also imported if needed elsewhere or handled by other mocks
     app,
-)  # Assuming current_active_user is also imported if needed elsewhere or handled by other mocks
+)
 
 # If current_active_user is solely for test_chat_rag_endpoint, keep its import local or ensure it's mockable
 from app.rag.processor import DocumentProcessor
-from app.api.orchestrator import (
-    RagOrchestrator,
-    get_rag_orchestrator,
-    Orchestrator,
-    get_orchestrator,
-)
-from langchain.schema import Document  # Add this import at the top of your test file
 
 
 # ─── Fixture: TestClient ─────────────────────────────────────────────
@@ -56,7 +52,9 @@ def test_document_processor_ingest_and_query(monkeypatch):
 
     class DummyVectorStore:
         def __init__(self, embedding_function, collection_name, persist_directory):
-            self.docs_store = []  # Renamed to avoid confusion with the 'documents' argument
+            self.docs_store = (
+                []
+            )  # Renamed to avoid confusion with the 'documents' argument
             self.embedding_function = embedding_function  # Store for potential use
 
         # Updated method signature and logic

@@ -12,16 +12,17 @@ Changes in this revision
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.settings import get_settings
-from app.db.session import engine  # global engine defined once in app.db.session
-from app.db.init_db import init_db
 from app.api.chat import router as chat_router
-from app.api.rag import router as rag_router, RagOrchestrator
-from app.auth.router import auth_router, register_router, fastapi_users
+from app.api.rag import RagOrchestrator
+from app.api.rag import router as rag_router
+from app.auth.router import auth_router, fastapi_users, register_router
 from app.auth.schemas import UserRead, UserUpdate
+from app.core.settings import get_settings
+from app.db.init_db import init_db
+from app.db.session import engine  # global engine defined once in app.db.session
 
 
 # ────────────────────────────────────────────────────────────────

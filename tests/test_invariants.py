@@ -6,10 +6,10 @@ Invariant checks that replace the old ad-hoc `check_*` helper scripts.
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.auth.router import get_jwt_strategy
 from app.core.settings import get_settings
-from app.db.session import get_async_session, AsyncSessionMaker
+from app.db.session import AsyncSessionMaker, get_async_session
+from app.main import app
 
 
 # ─────────────────────────  routing invariants  ─────────────────────────

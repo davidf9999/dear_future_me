@@ -1,6 +1,7 @@
 # app/api/rag.py
 
-from fastapi import APIRouter, Depends, UploadFile, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+
 from app.api.orchestrator import RagOrchestrator, get_rag_orchestrator
 from app.rag.processor import DocumentProcessor
 

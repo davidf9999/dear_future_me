@@ -1,18 +1,18 @@
 import logging
+
 from fastapi import Request
-from app.core.settings import get_settings
-
-from langchain_openai import ChatOpenAI
-
 from langchain.chains import RetrievalQA
-
+from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import (
     ChatPromptTemplate,
-    SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
 )
+from langchain_openai import ChatOpenAI
+
+from app.core.settings import get_settings
 from app.rag.processor import DocumentProcessor
-from langchain.chains.summarize import load_summarize_chain
+
 
 def get_orchestrator() -> "Orchestrator":
     return Orchestrator()

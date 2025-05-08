@@ -1,8 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
+
+from app.api.orchestrator import RagOrchestrator, get_rag_orchestrator
 from app.main import app
 from app.rag.processor import DocumentProcessor
-from app.api.orchestrator import get_rag_orchestrator, RagOrchestrator
 
 
 @pytest.fixture(autouse=True)

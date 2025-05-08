@@ -1,6 +1,7 @@
 # app/auth/router.py
 
 import uuid
+
 from fastapi import Depends
 from fastapi_users import FastAPIUsers
 from fastapi_users.authentication import AuthenticationBackend, JWTStrategy
@@ -8,10 +9,10 @@ from fastapi_users.authentication.transport import BearerTransport
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.manager import BaseUserManager
 
-from app.db.session import get_async_session
-from app.core.settings import get_settings
 from app.auth.models import UserTable
-from app.auth.schemas import UserRead, UserCreate
+from app.auth.schemas import UserCreate, UserRead
+from app.core.settings import get_settings
+from app.db.session import get_async_session
 
 
 # ────────────────────────────  DB adapter  ──────────────────────────────

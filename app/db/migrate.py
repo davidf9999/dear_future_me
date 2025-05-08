@@ -6,16 +6,14 @@ Usage:
     python -m app.db.migrate   # upgrades to latest head
 """
 
-import asyncio
 from pathlib import Path
-from alembic.config import Config
+
 from alembic import command
+from alembic.config import Config
 
 
 def upgrade_head() -> None:
-    cfg = Config(
-        str(Path(__file__).parent.parent.parent / "alembic.ini")
-    )
+    cfg = Config(str(Path(__file__).parent.parent.parent / "alembic.ini"))
     command.upgrade(cfg, "head")
 
 

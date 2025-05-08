@@ -13,9 +13,9 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy import text
 
+from app.auth.models import Base  # metadata for creating tables
 from app.core.settings import get_settings
 from app.db.session import AsyncSessionMaker
-from app.auth.models import Base  # metadata for creating tables
 
 
 # ── Reset cached settings so env-var changes per test are honoured ───────

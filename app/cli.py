@@ -14,13 +14,13 @@ import os
 import sys
 import warnings
 
+from dotenv import load_dotenv
+
 # suppress LangChain deprecation noise
 warnings.filterwarnings("ignore")
 
 # so we can do `python app/cli.py` from project root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from dotenv import load_dotenv
 
 load_dotenv()
 

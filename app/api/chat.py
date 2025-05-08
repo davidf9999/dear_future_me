@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 import asyncio
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
+from app.api.orchestrator import Orchestrator, get_orchestrator
 from app.core.settings import get_settings
-from app.api.orchestrator import get_orchestrator, Orchestrator
 
 # Load configuration
 cfg = get_settings()

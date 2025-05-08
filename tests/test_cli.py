@@ -9,9 +9,7 @@ def parse_args():
     """
     Parse command line arguments. Returns an argparse.Namespace.
     """
-    parser = argparse.ArgumentParser(
-        description="CLI for Dear Future Me application"
-    )
+    parser = argparse.ArgumentParser(description="CLI for Dear Future Me application")
     parser.add_argument(
         "--demo",
         action="store_true",
