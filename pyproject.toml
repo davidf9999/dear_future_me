@@ -1,0 +1,10 @@
+# pyproject.toml  (put in repository root)
+[tool.black]
+line-length = 120          # single source of truth
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 120          # ruff lint uses this
+
+[tool.ruff.format]
+line-length = 120          # ruff-format uses this
