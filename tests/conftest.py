@@ -14,9 +14,6 @@ class Settings(BaseSettings):
     CHROMA_NAMESPACE_THEORY: str = Field("theory", env="CHROMA_NAMESPACE_THEORY")
     CHROMA_NAMESPACE_PLAN: str = Field("personal_plan", env="CHROMA_NAMESPACE_PLAN")
     CHROMA_NAMESPACE_SESSION: str = Field("session_data", env="CHROMA_NAMESPACE_SESSION")
-    CHROMA_NAMESPACE_REFLECTIONS: str = Field(
-        "reflections", env="CHROMA_NAMESPACE_REFLECTIONS"
-    )
 
     class Config:
         env_file = ".env"
