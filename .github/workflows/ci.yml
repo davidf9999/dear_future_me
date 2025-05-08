@@ -36,14 +36,14 @@ jobs:
       - name: Ruff Lint
         run: ruff check .
 
-      # - name: Ruff Format check
-      #   run: ruff format --check .
+      - name: Ruff Format check
+        run: ruff format --check .
 
-      # - name: Black Check
-      #   run: black --check .
+      - name: Black Check
+        run: black --check .
 
-      # - name: Isort Check
-      #   run: isort --check .
+      - name: Isort Check
+        run: isort --check .
 
       - name: Mypy
         run: mypy app tests              # instead of `mypy .`
