@@ -1,0 +1,60 @@
+# .github/workflows/ci.yml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Minimal secrets for tests
+      DATABASE_URL: sqlite+aiosqlite:///./test.db
+      SECRET_KEY: gha-test-secret
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      OPENAI_API_KEY: "sk-test"        # avoids openai import errors
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install pre-commit
+
+      # ── Linters (fail on warnings) ────────────────────────────────────
+      - name: Ruff Lint
+        run: ruff check .
+
+      - name: Ruff Format check
+        run: ruff format --check .
+
+      - name: Black Check
+        run: black --check .
+
+      - name: Isort Check
+        run: isort --check .
+
+      - name: Mypy
+        run: mypy .
+
+      # ── Migrate test DB (proves Alembic works) ───────────────────────
+      - name: Alembic upgrade
+        run: |
+          alembic upgrade head
+          # show current revision
+          alembic current
+
+      # ── Run pytest suite ─────────────────────────────────────────────
+      - name: Pytest
+        run: pytest -q --disable-warnings
