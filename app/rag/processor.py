@@ -10,7 +10,7 @@ class DocumentProcessor:
     def __init__(self, namespace: str):
         cfg = get_settings()
         try:
-            emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)  # type: ignore[call-arg]
+            emb = OpenAIEmbeddings(openai_api_key=cfg.OPENAI_API_KEY)
         except TypeError:
             emb = OpenAIEmbeddings()
 
