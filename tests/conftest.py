@@ -1,37 +1,52 @@
 # tests/conftest.py
+"""
+Shared pytest fixtures for the Dear Future Me test-suite.
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
+Key points
+──────────
+* `app.core.settings.get_settings()` is now cached with @lru_cache, so we
+  clear that cache once per test (autouse fixture) to honour any
+  `monkeypatch.setenv()` calls a test might do.
+
+* We no longer define a shadow Settings class here; the real one is used.
+
+* The `clear_users_table` fixture keeps the auth table empty across tests
+  by checking out a single `AsyncSession` from the global pool.
+"""
+
 import pytest
 from sqlalchemy import text
+
+from app.core.settings import get_settings
 from app.db.session import get_async_session
 from app.auth.models import UserTable
 
-class Settings(BaseSettings):
-    OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
-    CHROMA_COLLECTION: str = Field("default", env="CHROMA_COLLECTION")
-    CHROMA_DIR: str = Field("chroma_db", env="CHROMA_DIR")
-    CHROMA_NAMESPACE_THEORY: str = Field("theory", env="CHROMA_NAMESPACE_THEORY")
-    CHROMA_NAMESPACE_PLAN: str = Field("personal_plan", env="CHROMA_NAMESPACE_PLAN")
-    CHROMA_NAMESPACE_SESSION: str = Field("session_data", env="CHROMA_NAMESPACE_SESSION")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-
-def get_settings() -> Settings:
-    return Settings()
+# ────────────────────────────────────────────────────────────────
+# Ensure each test gets fresh Settings after env-var tweaks
+# ────────────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def reset_settings_cache():
+    """
+    Clear the cached Settings object before *and* after every test
+    so that environment-variable changes inside a test are respected.
+    """
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
+# ────────────────────────────────────────────────────────────────
+# Keep the users table empty between tests
+# ────────────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 async def clear_users_table():
+    """
+    Truncate the users table so tests don’t bleed data into one another.
+    """
     async for session in get_async_session():
         try:
             await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
             await session.commit()
-        except Exception as e:
-            print(f"Error clearing users table: {e}")
-            await session.rollback()
         finally:
             break
