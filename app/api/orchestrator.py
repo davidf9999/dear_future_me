@@ -166,8 +166,11 @@ class Orchestrator:
     async def answer(self, query: str) -> str:
         try:
             return await self.chain.arun(query)
-        except Exception:
-            return f"Echo: {query}"
+
+        except Exception as exception:
+            return f"Error for {query=}: {exception=}"
+        # except Exception:
+        #     return f"Echo: {query}"
 
 
 class RagOrchestrator:

@@ -1,90 +1,184 @@
-#!/usr/bin/env python3
-# app/cli.py
 """
-Command-line interface for Dear Future Me.
+app/cli.py
+~~~~~~~~~~
 
-• --demo        : run two canned messages
-• --offline     : force stubbed responses (no network)
-The script also auto-falls back to offline mode if no real OPENAI_API_KEY is found.
+Small helper CLI for local demo & smoke-tests.
+
+Highlights
+----------
+* Auto-loads environment variables from `.env` (python-dotenv).
+* Registers a throw-away *demo* user (one per run) when AUTH is enabled.
+* Pretty TTY chat with **rich** colours.
+* Fails loudly (no “Echo” fall-back) if the backend doesn’t return
+  the expected JSON shape.
+
+Dependencies: click, httpx, rich, python-dotenv
+These are already in requirements.txt — add them if you trimmed the list.
 """
 
-import argparse
+from __future__ import annotations
+
 import asyncio
 import os
 import sys
-import warnings
+import uuid
+from typing import Any, Dict, Optional
 
+import click
+import httpx
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.text import Text
 
-# suppress LangChain deprecation noise
-warnings.filterwarnings("ignore")
+# --------------------------------------------------------------------------- #
+# Environment & constants
+# --------------------------------------------------------------------------- #
 
-# so we can do `python app/cli.py` from project root
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+load_dotenv()  # .env in project root
 
-load_dotenv()
-
-# ANSI color escapes
-CLIENT_PREFIX = "\033[94m🧑 Client:\033[0m"
-SYSTEM_PREFIX = "\033[92m🤖 System:\033[0m"
-
-
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="CLI for Dear Future Me")
-    p.add_argument("--demo", action="store_true", help="Run demo conversation")
-    p.add_argument(
-        "--offline",
-        action="store_true",
-        help="Use stubbed replies (no OpenAI, no network)",
-    )
-    return p.parse_args()
+API_URL = os.getenv("DFM_API_URL", "http://localhost:8000")
+DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+_DEFAULT_PWD = os.getenv("DFM_DEMO_PASSWORD", "secret")
 
 
-def _get_orchestrator(offline: bool):
-    if offline:
-        # lightweight stub that just apologizes
-        class _Dummy:
-            async def answer(self, q: str) -> dict:
-                return {"query": q, "result": f"Echo: {q}"}
-
-        return _Dummy()
-
-    from app.api.orchestrator import Orchestrator
-
-    return Orchestrator()
+# --------------------------------------------------------------------------- #
+# Helper HTTP wrapper
+# --------------------------------------------------------------------------- #
 
 
-async def _run_demo(orch) -> None:
-    msgs = [
-        "Hello, I'm feeling a bit anxious today.",
-        "Can you help me understand why?",
-    ]
-    for m in msgs:
-        # Client message
-        print(f"{CLIENT_PREFIX} {m}\n")
+class API:
+    """Thin async wrapper around the HTTP endpoints."""
 
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self._token: Optional[str] = None
+        self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+
+    # ----------------------------- low-level --------------------------------
+
+    async def _post(
+        self,
+        path: str,
+        json: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> httpx.Response:
+        url = f"{self.base_url}{path}"
+        _headers = headers or {}
+        if self._token:
+            _headers["Authorization"] = f"Bearer {self._token}"
+        resp = await self._client.post(url, json=json, data=data, headers=_headers)
+        resp.raise_for_status()
+        return resp
+
+    # ----------------------------- auth -------------------------------------
+
+    async def login(self, email: str, password: str):  #  -> str: # error: Incompatible return value type
+        form = {"username": email, "password": password}
+        r = await self._post("/auth/login", data=form)
+        self._token = r.json()["access_token"]
+        return self._token
+
+    async def register_demo_user(self) -> str:
+        """Registers a random user & immediately logs in."""
+        email = f"demo_{uuid.uuid4()}@example.com"
+        pwd = _DEFAULT_PWD
         try:
-            resp = await orch.answer(m)
-        except Exception as e:
-            print(f"⚠️  LLM error ({e}). Falling back to offline stub.\n")
-            orch = _get_orchestrator(offline=True)
-            resp = await orch.answer(m)
+            # Registration may fail (if DEMO_MODE disables auth), so ignore errors.
+            await self._post("/auth/register", json={"email": email, "password": pwd})
+        except httpx.HTTPStatusError:
+            pass
+        return await self.login(email, pwd)
 
-        # If the orchestrator returned a dict with 'result', unwrap it
-        text = resp.get("result") if isinstance(resp, dict) else resp
-        print(f"{SYSTEM_PREFIX} {text}\n")
+    # ----------------------------- business ---------------------------------
+
+    async def chat(self, message: str) -> str:
+        r = await self._post("/chat/text", json={"message": message})
+        data = r.json()
+        # if "answer" not in data:
+        #     # Backend returned something unexpected – surface to user & dev log.
+        #     raise RuntimeError(f"Unexpected response payload: {data}")
+        # return data["answer"]
+        answer = data.get("answer") or data.get("reply")
+        if answer is None:
+            raise RuntimeError(f"Unexpected response payload: {data}")
+        return answer
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
-def main() -> None:
-    args = _parse_args()
-    if args.demo:
-        offline = args.offline or not os.getenv("OPENAI_API_KEY")
-        if offline:
-            warnings.warn("Running demo in OFFLINE mode (no OpenAI).", RuntimeWarning)
-        asyncio.run(_run_demo(_get_orchestrator(offline)))
-    else:
-        print("No --demo flag provided. Nothing to do.")
+# --------------------------------------------------------------------------- #
+# CLI definition (click)
+# --------------------------------------------------------------------------- #
+
+console = Console()
 
 
-if __name__ == "__main__":
-    main()
+@click.group()
+def cli() -> None:  # pragma: no cover
+    """Dear-Future-Me utility CLI."""
+    pass
+
+
+@cli.command(help="Interactive chat with the running API server.")
+@click.option(
+    "--url",
+    default=API_URL,
+    show_default=True,
+    help="Base URL of the FastAPI server.",
+)
+def chat(url: str) -> None:  # pragma: no cover
+    """Start an interactive chat session."""
+    api = API(url)
+
+    async def _run() -> None:
+        # ------------------------------------------------------------------ auth
+        token: Optional[str] = None
+        if not DEMO_MODE:
+            token = await api.register_demo_user()
+        banner = f"[bold green]Logged in as {token}[/bold green]\n" if token else ""
+        console.print(banner + "[bold]Dear-Future-Me interactive chat[/bold]")
+        console.print("Type 'exit' to quit.\n")
+
+        # ------------------------------------------------------------------ loop
+        while True:
+            try:
+                # query = Prompt.ask(Text("you:", style="bold bright_white")).strip()
+                query = console.input("[bold cyan]you:[/bold cyan] ").strip()
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[bold]Bye![/bold]")
+                break
+
+            if query.lower() in {"exit", "quit"}:
+                break
+
+            try:
+                answer = await api.chat(query)
+            except Exception as ex:  # noqa: BLE001
+                console.print("[bold red]Oops! Something went wrong on the server side.[/bold red]")
+                console.print("(Details logged to stderr)")
+                print("----- TRACEBACK -----", file=sys.stderr)
+                import traceback
+
+                traceback.print_exception(ex, file=sys.stderr)
+                break
+
+            console.print(Text("ai:", style="bold cyan"), answer)
+
+    try:
+        asyncio.run(_run())
+    finally:
+        # Ensure connection pool closed properly
+        try:
+            asyncio.run(api.close())
+        except RuntimeError:
+            pass
+
+
+# --------------------------------------------------------------------------- #
+# Entry-point
+# --------------------------------------------------------------------------- #
+
+if __name__ == "__main__":  # pragma: no cover
+    cli()
