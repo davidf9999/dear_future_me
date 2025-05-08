@@ -20,7 +20,7 @@ async def ingest_document(
     ),
     doc_id: str = Form(...),
     text: str = Form(None),
-    file: UploadFile = None,
+    file: UploadFile | None = None,
 ):
     if file:
         raw = (await file.read()).decode("utf-8")

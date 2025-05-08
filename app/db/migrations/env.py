@@ -35,7 +35,9 @@ from app.core.settings import get_settings  # noqa: E402
 # Alembic config & metadata
 # ────────────────────────────────────────────────────────────────────────
 config = context.config
-fileConfig(config.config_file_name)  # set up loggers
+
+if config.config_file_name:  # ← avoid Optional[str] issue
+    fileConfig(config.config_file_name)  # type: ignore[arg-type]
 
 target_metadata = Base.metadata  # for autogenerate
 
