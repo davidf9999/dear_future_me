@@ -1,6 +1,6 @@
 # Dear Future Me
 
-**An AI-driven future-self coaching system for suicide prevention**
+## An AI-driven future-self coaching system for suicide prevention
 
 ---
 
@@ -8,11 +8,14 @@
 
 `Dear Future Me` provides a compassionate conversational interface where users chat with an AI persona representing their own positive, thriving future selves. It combines:
 
-* **Crisis Detection**: Immediate identification of self-harm intent triggers safe fallback and crisis resources.
-* **Retrieval-Augmented Generation (RAG)**:  Using four namespaces—`theory`, `personal_plan`, `session_data`, and `future_me`—for context-aware, person-centered responses.
-* **Therapist Co-creation**: Therapists and clients collaborate to craft a **Future-Me Narrative**, stored in the `future_me` RAG store.
-* **Session Summarization**: Therapists can summarize session history for review and refinement.
-* **CLI Demo**: A lightweight command-line interface to showcase functionality offline.
+| Capability | Notes |
+|------------|-------|
+| **Crisis Detection** | Detects self-harm intent and answers with safety-plan snippets + hotlines |
+| **Retrieval-Augmented Generation (RAG)** | Four namespaces – `theory`, `personal_plan`, `session_data`, `future_me` |
+| **Singleton RagOrchestrator** | Instantiated once at startup for efficient RAG queries |
+| **Therapist Co-creation** | Clinician and client build a *Future-Me Narrative* (stored in `future_me`) |
+| **Session Summarization** | `/rag/session/{id}/summarize` endpoint |
+| **Demo Mode** | Public chat & auto-reset DB; in production chat is JWT-protected |
 
 ---
 
