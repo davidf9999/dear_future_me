@@ -9,6 +9,8 @@ Key changes
 * Adds `model_config["env_file"]`, so we keep .env loading.
 """
 
+from functools import lru_cache
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -47,5 +49,6 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
