@@ -51,4 +51,9 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    """
+    ALWAYS call this helper instead of instantiating `Settings()` directly.
+    Tests rely on the .cache_clear() method, and production code benefits
+    from caching.
+    """
+    return Settings()  # type: ignore[call-arg]
