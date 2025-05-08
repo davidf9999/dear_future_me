@@ -78,9 +78,11 @@ docker-compose.override.yml
 
 # Database files
 *.sqlite3
+*.db
 
 # Miscellaneous
 __pycache__/
 *.pem                    # private keys
 
-*.db
+# chroma RAG
+chroma_data/
