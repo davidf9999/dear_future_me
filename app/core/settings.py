@@ -26,9 +26,7 @@ class Settings(BaseSettings):
     # ── Core & Auth ────────────────────────────────────────────
     DATABASE_URL: str = Field(validation_alias="DATABASE_URL")
     SECRET_KEY: str = Field(validation_alias="SECRET_KEY")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
     # ── Flags ─────────────────────────────────────────────────
     DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")

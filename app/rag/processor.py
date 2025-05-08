@@ -23,9 +23,7 @@ class DocumentProcessor:
     def ingest(self, doc_id: str, text: str, metadata: dict | None = None) -> None:
         """Ingest a piece of text under doc_id."""
         documents = [Document(page_content=text, metadata=metadata or {})]
-        self.vectordb.add_documents(
-            documents=documents, ids=[doc_id]
-        )  # Use doc_id here
+        self.vectordb.add_documents(documents=documents, ids=[doc_id])  # Use doc_id here
         self.vectordb.persist()
 
     def query(self, query: str, k: int = 5) -> list[Document]:

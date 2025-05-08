@@ -6,5 +6,3 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 120          # ruff lint uses this
 
-[tool.ruff.format]
-line-length = 120          # ruff-format uses this

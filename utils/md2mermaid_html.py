@@ -61,11 +61,7 @@ def main() -> None:
 
     # Determine output HTML and PNG paths (absolute)
     html_abs = md_path.with_suffix(".html").resolve()
-    png_abs = (
-        Path(sys.argv[2]).resolve()
-        if len(sys.argv) > 2
-        else md_path.with_suffix(".png").resolve()
-    )
+    png_abs = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else md_path.with_suffix(".png").resolve()
 
     # Extract the first mermaid code block
     text = md_path.read_text(encoding="utf-8")
@@ -81,9 +77,7 @@ def main() -> None:
     print(f"✅   Wrote HTML preview to {html_abs.name}")
 
     # Render to PNG
-    asyncio.get_event_loop().run_until_complete(
-        render_to_png(str(html_abs), str(png_abs))
-    )
+    asyncio.get_event_loop().run_until_complete(render_to_png(str(html_abs), str(png_abs)))
     print(f"✅   Wrote PNG output to    {png_abs.name}")
 
 

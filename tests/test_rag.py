@@ -27,9 +27,7 @@ def client():
 
 
 def test_ingest_text(client):
-    res = client.post(
-        "/rag/ingest/", data={"namespace": "theory", "doc_id": "d1", "text": "x"}
-    )
+    res = client.post("/rag/ingest/", data={"namespace": "theory", "doc_id": "d1", "text": "x"})
     assert res.status_code == 200
     assert res.json()["doc_id"] == "d1"
 

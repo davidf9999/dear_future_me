@@ -39,9 +39,7 @@ def test_document_processor_ingest_and_query(monkeypatch):
             # Return a list of embeddings, one for each document
             return [[0.0] for _ in docs]  # Corrected: should be a list of lists
 
-        def embed_query(
-            self, text
-        ):  # Chroma's similarity_search might use embed_query for the query string
+        def embed_query(self, text):  # Chroma's similarity_search might use embed_query for the query string
             return [0.0]
 
         # __call__ might be used by older LangChain versions or specific embedding wrapper patterns
@@ -52,15 +50,11 @@ def test_document_processor_ingest_and_query(monkeypatch):
 
     class DummyVectorStore:
         def __init__(self, embedding_function, collection_name, persist_directory):
-            self.docs_store = (
-                []
-            )  # Renamed to avoid confusion with the 'documents' argument
+            self.docs_store = []  # Renamed to avoid confusion with the 'documents' argument
             self.embedding_function = embedding_function  # Store for potential use
 
         # Updated method signature and logic
-        def add_documents(
-            self, documents: list[Document], ids: list[str] | None = None, **kwargs
-        ):
+        def add_documents(self, documents: list[Document], ids: list[str] | None = None, **kwargs):
             # `documents` is now expected to be a list of LangChain Document objects
             # The real Chroma.add_documents might do more, like creating embeddings internally if not pre-embedded
             # For this dummy, we'll just store them.

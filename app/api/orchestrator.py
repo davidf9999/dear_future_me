@@ -157,9 +157,7 @@ class Orchestrator:
             self._rag_chain = _Stub()
 
         # single entry-point
-        self.chain = BranchingChain(
-            self._detect_risk, self._crisis_chain, self._rag_chain
-        )
+        self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
     def _detect_risk(self, text: str) -> bool:
         txt = text.lower()

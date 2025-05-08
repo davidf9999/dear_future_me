@@ -34,10 +34,7 @@ async def lifespan(app: FastAPI):
 
     # Fatal mis-configuration guard ─────────────────────────────
     if not cfg.SECRET_KEY or cfg.SECRET_KEY.startswith("<fill"):
-        raise RuntimeError(
-            "❌ SECRET_KEY is not configured. Please set it in your .env "
-            "before starting the server."
-        )
+        raise RuntimeError("❌ SECRET_KEY is not configured. Please set it in your .env " "before starting the server.")
 
     # Optional demo DB reset ────────────────────────────────────
     if cfg.DEMO_MODE:
