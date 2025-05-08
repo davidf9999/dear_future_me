@@ -1,7 +1,7 @@
 
 services:
   chroma:
-    image: ghcr.io/chroma-core/chroma:0.4
+    image: chromadb/chroma:latest
     container_name: chroma
     restart: unless-stopped
     healthcheck:
