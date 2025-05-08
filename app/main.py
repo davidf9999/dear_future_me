@@ -1,6 +1,7 @@
 # app/main.py
 
 from fastapi import FastAPI, Depends
+from app.core import settings
 from app.db.init_db import init_db
 from app.core.settings import get_settings
 
@@ -8,7 +9,18 @@ from app.auth.router import auth_router, register_router, fastapi_users
 from app.auth.schemas import UserRead, UserUpdate
 
 from app.api.chat import router as chat_router
-from app.api.rag import router as rag_router, get_rag_orchestrator, RagOrchestrator
+from app.api.rag import router as rag_router, RagOrchestrator
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.DEMO_MODE:
+        await init_db()
+    app.state.rag_orchestrator = RagOrchestrator()
+    yield
+    # optional cleanup here
+
 
 current_active_user = fastapi_users.current_user(active=True)
 
