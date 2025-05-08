@@ -1,0 +1,35 @@
+# .pre-commit-config.yaml
+repos:
+  # ── Ruff: lint + autofix + unused-import cleanup ───────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Black code formatter (idempotent with Ruff) ────────────────────────
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.11
+
+  # ── Isort (import ordering; run *after* Black to keep hashes stable) ───
+  - repo: https://github.com/pre-commit/mirrors-isort
+    rev: v5.10.1
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: [--profile=black]
+        language_version: python3.11
+
+  # ── Mypy (type checking). Non-blocking; use `pass_filenames: false` so
+  #    the whole project is checked, not just staged files. ───────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        args: [--show-error-codes]
+        pass_filenames: false
+        language_version: python3.11
