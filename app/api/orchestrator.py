@@ -96,7 +96,7 @@ class Orchestrator:
                     "User query: {query}"
                 )
             crisis_prompt = ChatPromptTemplate.from_template(crisis_md)
-            logging.error(f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt.input_variables}")
+            logging.info(f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt.input_variables}")
             self._crisis_chain = RetrievalQA.from_chain_type(
                 llm=ChatOpenAI(model_name=cfg.LLM_MODEL, temperature=0.0),
                 chain_type="stuff",
@@ -105,7 +105,7 @@ class Orchestrator:
                 return_source_documents=False,
             )
             if hasattr(self._crisis_chain, "combine_documents_chain"):
-                logging.error(
+                logging.info(
                     f"DIAGNOSTIC - Crisis Combine Docs Chain Input Keys: {self._crisis_chain.combine_documents_chain.input_keys}"
                 )
 
@@ -170,7 +170,7 @@ class Orchestrator:
 
             rag_prompt = ChatPromptTemplate.from_template(system_md)
             # system_prompt.md should use {input} for the question and {context} for documents
-            logging.error(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")
+            logging.info(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")
 
             llm = ChatOpenAI(
                 model_name=cfg.LLM_MODEL,
@@ -179,7 +179,7 @@ class Orchestrator:
 
             # This chain combines the retrieved documents and the question into a single prompt for the LLM
             question_answer_chain = create_stuff_documents_chain(llm, rag_prompt)
-            logging.error(
+            logging.info(
                 f"DIAGNOSTIC - RAG question_answer_chain (stuff_documents_chain) Input Schema Keys: {list(question_answer_chain.input_schema.schema().get('properties').keys()) if hasattr(question_answer_chain, 'input_schema') and hasattr(question_answer_chain.input_schema, 'schema') and question_answer_chain.input_schema.schema().get('properties') else 'N/A (input_schema not as expected)'}"
             )
 
