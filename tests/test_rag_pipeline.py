@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from langchain.schema import Document  # Add this import at the top of your test file
 
 from app.api.orchestrator import Orchestrator, RagOrchestrator, get_rag_orchestrator
-from app.main import (  # Assuming current_active_user is also imported if needed elsewhere or handled by other mocks
-    app,
+from app.main import (
+    app,  # Assuming current_active_user is also imported if needed elsewhere or handled by other mocks
 )
 
 # If current_active_user is solely for test_chat_rag_endpoint, keep its import local or ensure it's mockable
