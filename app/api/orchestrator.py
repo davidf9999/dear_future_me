@@ -3,6 +3,8 @@ from typing import Any, Dict, List
 
 from fastapi import Request
 from langchain.chains import RetrievalQA
+from langchain.chains.combine_documents.stuff import StuffDocumentsChain
+from langchain.chains.llm import LLMChain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.callbacks.manager import AsyncCallbackManagerForRetrieverRun
@@ -172,21 +174,29 @@ class Orchestrator:
 
             rag_prompt = ChatPromptTemplate.from_template(system_md)
             logging.error(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")  # Temp to ERROR
-            self._rag_chain = RetrievalQA.from_chain_type(
-                llm=ChatOpenAI(
-                    model_name=cfg.LLM_MODEL,
-                    temperature=cfg.LLM_TEMPERATURE,
-                ),
-                chain_type="stuff",
+            # Explicitly create the LLMChain and StuffDocumentsChain
+            llm = ChatOpenAI(
+                model_name=cfg.LLM_MODEL,
+                temperature=cfg.LLM_TEMPERATURE,
+            )
+            llm_chain_for_rag = LLMChain(llm=llm, prompt=rag_prompt)
+            logging.error(f"DIAGNOSTIC - RAG LLMChain Input Keys: {llm_chain_for_rag.input_keys}")
+
+            combine_documents_chain_for_rag = StuffDocumentsChain(
+                llm_chain=llm_chain_for_rag,
+                document_variable_name="context",  # This should match the variable in rag_prompt for documents
+                # The other input variable for rag_prompt ("input") will be passed from RetrievalQA
+            )
+            logging.error(
+                f"DIAGNOSTIC - RAG Explicit Combine Docs Chain Input Keys: {combine_documents_chain_for_rag.input_keys}"
+            )
+
+            self._rag_chain = RetrievalQA(
+                combine_documents_chain=combine_documents_chain_for_rag,
                 retriever=combined_retriever,
-                chain_type_kwargs={"prompt": rag_prompt},
                 return_source_documents=False,
                 input_key="input",
             )
-            if hasattr(self._rag_chain, "combine_documents_chain"):
-                logging.error(  # Temp to ERROR
-                    f"DIAGNOSTIC - RAG Combine Docs Chain Input Keys: {self._rag_chain.combine_documents_chain.input_keys}"
-                )
         except Exception as e:
             logging.exception(f"Failed to initialize main RAG chain. Using stub. Exception: {e}")
 
