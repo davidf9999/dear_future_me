@@ -40,7 +40,7 @@ async def test_answer_fallback_on_error(monkeypatch):
             raise RuntimeError
 
     orch.chain = Bad()
-    assert await orch.answer("anything") == "Echo: anything"
+    assert await orch.answer("anything") == "I’m sorry, I’m unable to answer that right now. Please try again later."
 
 
 @pytest.mark.asyncio
@@ -76,3 +76,11 @@ def test_rag_orchestrator_has_future_db():
     from app.rag.processor import DocumentProcessor
 
     assert isinstance(orch.future_db, DocumentProcessor)
+
+
+def test_detect_risk_functionality():
+    orch = Orchestrator()
+    assert orch._detect_risk("I want to die") is True
+    assert orch._detect_risk("I feel HOPELESS sometimes") is True
+    assert orch._detect_risk("I am happy today") is False
+    assert orch._detect_risk("") is False

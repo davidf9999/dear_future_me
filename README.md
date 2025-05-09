@@ -8,14 +8,15 @@
 
 `Dear Future Me` provides a compassionate conversational interface where users chat with an AI persona representing their own positive, thriving future selves. It combines:
 
-| Capability | Notes |
-|------------|-------|
-| **Crisis Detection** | Detects self-harm intent and answers with safety-plan snippets + hotlines |
-| **Retrieval-Augmented Generation (RAG)** | Four namespaces – `theory`, `personal_plan`, `session_data`, `future_me` |
-| **Singleton RagOrchestrator** | Instantiated once at startup for efficient RAG queries |
-| **Therapist Co-creation** | Clinician and client build a *Future-Me Narrative* (stored in `future_me`) |
-| **Session Summarization** | `/rag/session/{id}/summarize` endpoint |
-| **Demo Mode** | Public chat & auto-reset DB; in production chat is JWT-protected |
+| Capability                               | Notes                                                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Crisis Detection**                     | Detects self-harm intent and answers with safety-plan snippets + hotlines.                           |
+| **Retrieval-Augmented Generation (RAG)** | Utilizes multiple RAG namespaces: `theory`, `personal_plan`, `session_data`, `future_me`.            |
+| **Modern LangChain Chains**              | Employs `create_retrieval_chain` and `create_stuff_documents_chain` for efficient RAG.                 |
+| **Singleton RagOrchestrator**            | Instantiated once at startup for efficient RAG queries related to session summarization.             |
+| **Therapist Co-creation**                | Clinician and client build a *Future-Me Narrative* (stored in `future_me` RAG namespace).            |
+| **Session Summarization**                | `/rag/session/{id}/summarize` endpoint (Note: document retrieval for summarization is a TODO).       |
+| **Demo Mode & Auth Mode**                | Supports public chat in demo mode and JWT-protected chat in production mode.                         |
 
 ---
 
@@ -29,224 +30,230 @@ flowchart TD
   %% ── Top: Onboarding ───────────────────────────────────────
   subgraph Onboarding["Therapist Onboarding"]
     direction TB
-    OA["Therapist uploads docs"]
-    OB["Index into RAG store: theory, plan, session"]
+    OA["Therapist uploads docs (e.g., personal plan, session notes, future-me profile)"]
+    OB["Docs indexed into respective RAG namespaces (ChromaDB)"]
     OA --> OB
   end
 
   %% ── Middle: Client Chat Loop ─────────────────────────────
-  subgraph ChatLoop["Client Chat Loop"]
+  subgraph ChatLoop["Client Chat Loop via /chat/text"]
     direction TB
-    CA["Client message"]
-    CB{"Contains self-harm keywords?"}
-    CC["Log warning & alert therapist"]
-    CD["Respond with crisis resources"]
-    CE["Retrieve & RAG QA"]
-    CF["System reply (≤ 100 words, 1 action)"]
-    FMP["Future Me Profile (persona prompt)"]
+    CLIENT_MSG["Client sends message"]
+    ORCH["Orchestrator receives message"]
+    DETECT_RISK{"Orchestrator: Detect self-harm keywords?"}
+    
+    subgraph CrisisPath [Crisis Response]
+        LOG_ALERT_CRISIS["Log warning & (conceptually) alert therapist"]
+        CRISIS_CHAIN["Invoke Crisis Chain (RetrievalQA on 'personal_plan' namespace)"]
+        CRISPLY["Respond with crisis resources (from safety plan & hotline info)"]
+    end
 
-    CA --> CB
-    CB -- Yes --> CC --> CD --> CA
-    CB -- No  --> CE --> CF --> CA
-    FMP --> CE
+    subgraph RagPath [Standard RAG Response]
+        COMBINED_RETRIEVER["Invoke CombinedRetriever (searches 'theory', 'plan', 'session', 'future_me' namespaces)"]
+        QUESTION_ANSWER_CHAIN["Invoke Question/Answer Chain (create_stuff_documents_chain with 'system_prompt.md')"]
+        RAG_REPLY["System reply (persona-based, empathetic, ≤ 100 words, 1 action)"]
+    end
+
+    CLIENT_MSG --> ORCH
+    ORCH --> DETECT_RISK
+    DETECT_RISK -- Yes --> LOG_ALERT_CRISIS --> CRISIS_CHAIN --> CRISPLY
+    DETECT_RISK -- No  --> COMBINED_RETRIEVER --> QUESTION_ANSWER_CHAIN --> RAG_REPLY
+    
+    CRISPLY --> CLIENT_MSG_LOOP_END[Client Receives Reply]
+    RAG_REPLY --> CLIENT_MSG_LOOP_END
   end
 
   %% ── Bottom: Therapist Review ─────────────────────────────
-  subgraph Review["Therapist Review"]
+  subgraph Review["Therapist Review (Conceptual)"]
     direction TB
-    RA["Therapist calls /rag/session/{id}/summarize"]
-    RB["Review summary & update docs"]
+    RA["Therapist calls /rag/session/{id}/summarize (TODO: full implementation)"]
+    RB["Therapist reviews summary & potentially updates client documents"]
     RA --> RB
   end
 
   %% ── Cross-stage links ────────────────────────────────────
-  OB --> CA
-  CF --> RA
-  RB --> OB
-  RB --> OA
+  OB -- RAG data available for --> ChatLoop
+  CLIENT_MSG_LOOP_END -- (Session data might be logged/ingested) --> RA
+  RB -- Updates docs for --> OB
 ```
 
 ---
 
-## 🚀 Quickstart with Docker
+## 🚀 Quickstart
 
 ### Prerequisites
 
-* [Docker](https://docs.docker.com/get-docker/)
-* [Docker Compose](https://docs.docker.com/compose/)
-* A valid OpenAI API key (for production mode)
+*   Docker
+*   Docker Compose (Recommended for running with ChromaDB)
+*   Python 3.11+ (for local development without Docker)
+*   A valid OpenAI API key.
 
-### Build & Run
+### Setup `.env`
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/your-org/dear_future_me.git # Replace with your repo URL
+    cd dear_future_me
+    ```
+2.  Copy the example environment file and configure it:
+    ```bash
+    cp .env.example .env
+    ```
+3.  Edit `.env` to set your `SECRET_KEY`, `DATABASE_URL` (if not using the default SQLite), and especially your `OPENAI_API_KEY`.
+    *   To generate a `SECRET_KEY`: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+
+### Option 1: Running with Docker Compose (Recommended)
+
+This starts the FastAPI application and a ChromaDB vector store.
 
 ```bash
-# Clone the repo
-git clone https://github.com/your-org/dear_future_me.git
-cd dear_future_me
-
-# Copy and configure .env file
-cp .env.example .env
-# Edit .env to set SECRET_KEY, DATABASE_URL, OPENAI_API_KEY, etc.
-
-# Start server locally
-uvicorn app.main:app --reload
-
-# Or, start services via Docker Compose
 docker-compose up --build -d
-
-# Check health
-curl http://localhost:8000/ping    # {"ping":"pong"}
-
-# Access the API docs, to see what endpoints exist and experiment with using them
-http://localhost:8000/docs
 ```
+
+### Option 2: Running Locally (without Docker for ChromaDB)
+
+This is suitable if you want to run ChromaDB separately or use an in-memory version for quick tests (requires code changes in `DocumentProcessor` for non-persistent Chroma). The default setup persists Chroma data to `./chroma_data`.
+
+1.  Create and activate a virtual environment:
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
+2.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    pip install -r requirements-dev.txt # For linters, testing tools
+    ```
+3.  Run database migrations (if `DEMO_MODE=false`):
+    ```bash
+    alembic upgrade head
+    ```
+4.  Start the FastAPI server:
+    ```bash
+    uvicorn app.main:app --reload --port 8000
+    ```
+
+### Verify Server is Running
+
+```bash
+curl http://localhost:8000/ping
+# Expected output: {"ping":"pong"}
+```
+
+Access the API docs (Swagger UI) at http://localhost:8000/docs.
 
 ---
 
-## 🎭 Demo Mode (No Auth)
+## 🗣️ Quickstart with CLI (Interacting with the Server)
 
-For quick demos without user accounts:
+The `app/cli.py` provides an interactive command-line interface to chat with the running API server.
 
-1. In your `.env`, set:
+1.  **Ensure the server is running** (either via Docker Compose or locally).
+2.  **Open a new terminal** in the project root.
+3.  **(If not using Docker for the CLI)** Activate your virtual environment: `source .venv/bin/activate`
+4.  **Start the interactive chat**:
+    ```bash
+    python app/cli.py chat
+    ```
+    You can also specify the server URL if it's not running on the default `http://localhost:8000`:
+    ```bash
+    python app/cli.py chat --url http://your-server-address:port
+    ```
 
-   ```dotenv
-   DEMO_MODE=true
-   ```
-
-2. Ingest fake demo data (see **Demo Data** below).
-3. Chat via CLI or HTTP without login:
-
-   ```bash
-   # HTTP chat
-   curl -X POST http://localhost:8000/chat/text \
-     -H "Content-Type: application/json" \
-     -d '{"message":"Hi, I feel stuck."}'
-
-   # CLI demo
-   docker exec -it <web_container> python app/cli.py --demo
-   ```
+*   If the server is running with `DEMO_MODE=false` (production mode), the CLI will automatically attempt to register a new temporary demo user and log in for the session.
+*   If `DEMO_MODE=true`, authentication is bypassed for the chat endpoint.
 
 ---
 
-## 🛠️ Production Mode (With Auth)
+## 🎭 Demo Mode vs. Production Mode
 
-1. Ensure `DEMO_MODE=false` or unset.
-2. Register and login:
+Controlled by the `DEMO_MODE` variable in your `.env` file.
 
-   ```bash
-   # Register a new user
-   curl -X POST http://localhost:8000/auth/register \
-     -H "Content-Type: application/json" \
-     -d '{"email":"user@example.com","password":"secret"}'
-
-   # Login to get token
-   ```
-
-token=\$(curl -s -X POST [http://localhost:8000/auth/login](http://localhost:8000/auth/login)&#x20;
--F username=[user@example.com](mailto:user@example.com) -F password=secret | jq -r .access\_token)
-
-````
-3. Use protected endpoints:
-```bash
-curl -X POST http://localhost:8000/chat/text \
-  -H "Authorization: Bearer $token" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Hello!"}'
-````
+*   **`DEMO_MODE=true`**:
+    *   The `/chat/text` endpoint is public (no authentication required).
+    *   The database is reset (tables dropped and recreated) on each application startup. Good for clean demos.
+*   **`DEMO_MODE=false`** (Production-like):
+    *   The `/chat/text` endpoint requires JWT authentication. Users must register and log in.
+    *   Database migrations are applied on startup, but data persists.
 
 ---
 
-## 💾 Managing the RAG Store
+## 💾 Managing the RAG Store (ChromaDB)
 
-All vector data is persisted under the directory defined in `CHROMA_DIR` (default `./chroma_data`).
+All vector data is persisted under the directory defined by `CHROMA_DIR` in `app.core.settings.py` (defaults to `./chroma_data` when running locally, or `/data` inside the `web` Docker container, mapped to the `chroma_data` volume).
 
-### Cleaning (Reset All)
+### Ingesting Demo Data
 
-```bash
-rm -rf ./chroma_data/*
-```
-
-### Cleaning One Namespace
+Sample text files are provided in the `demo_data/` folder. Use the `demo_ingestion.sh` script to ingest them (ensure `CHROMA_DIR` in the script matches your setup if not using Docker Compose defaults):
 
 ```bash
-rm -rf ./chroma_data/<namespace>*
+./demo_ingestion.sh
 ```
+This script first clears old demo collections from the specified `CHROMA_DIR` and then uses `curl` to call the `/rag/ingest/` endpoint for each demo file.
 
----
+### Cleaning the RAG Store
 
-## 📂 Demo Data & Ingestion
-
-Create a `demo_data/` folder with four text files:
-
-```text
-demo_data/
-├── theory_excerpts.txt
-├── personal_plan.txt
-├── session_notes.txt
-└── future_me_profile.txt
-```
-
-**Ingest via HTTP**:
-
-```bash
-curl -X POST http://localhost:8000/rag/ingest/ \
-  -F namespace=theory         -F doc_id=theory_demo         -F file=@demo_data/theory_excerpts.txt
-curl -X POST http://localhost:8000/rag/ingest/ \
-  -F namespace=personal_plan  -F doc_id=plan_demo           -F file=@demo_data/personal_plan.txt
-curl -X POST http://localhost:8000/rag/ingest/ \
-  -F namespace=session_data   -F doc_id=session_demo        -F file=@demo_data/session_notes.txt
-curl -X POST http://localhost:8000/rag/ingest/ \
-  -F namespace=future_me      -F doc_id=future_demo         -F file=@demo_data/future_me_profile.txt
-```
+*   **To reset all demo data if using `demo_ingestion.sh`**: Simply re-run `./demo_ingestion.sh`.
+*   **Manual Cleaning (Local `CHROMA_DIR`)**:
+    ```bash
+    rm -rf ./chroma_data/*  # Or your configured CHROMA_DIR
+    ```
+*   **Manual Cleaning (Docker Volume)**: If using the `chroma_data` Docker volume:
+    ```bash
+    docker-compose down -v # This will stop containers and remove volumes, including chroma_data
+    docker-compose up --build -d # Restart (Chroma will start with an empty store)
+    # Then re-ingest data
+    ```
 
 ---
 
 ## 🧪 Testing
 
-To run the full test suite:
+Ensure you have development dependencies installed (`pip install -r requirements-dev.txt`).
 
 ```bash
-# Locally (with Python)
-pytest -q --disable-warnings
-
-# Inside Docker
-docker exec -it <web_container> pytest -q
+# Run pytest suite (uses test.db, DEMO_MODE=true by default for tests)
+pytest -q
 ```
 
 ---
 
-## 📦 Project Structure
+## 📦 Project Structure (Simplified)
 
 ```text
 ├── app/                # FastAPI application
-│   ├── api/
-│   │   ├── chat.py
-│   │   ├── orchestrator.py
-│   │   └── rag.py
-│   ├── auth/
-│   ├── core/
-│   ├── db/
-│   ├── rag/
-│   └── cli.py
-├── demo_data/          # Sample texts for demo ingestion
-├── templates/          # Prompt templates
+│   ├── api/            # API endpoint definitions (chat.py, orchestrator.py, rag.py)
+│   ├── auth/           # Authentication logic
+│   ├── core/           # Core settings and configurations
+│   ├── db/             # Database session, models, migrations
++   │   ├── migrations/   # Alembic migration scripts
+│   ├── rag/            # RAG processing logic (DocumentProcessor)
+│   └── cli.py          # Interactive CLI client
+│   └── main.py         # FastAPI app instantiation and main router setup
+├── demo_data/          # Sample texts for RAG ingestion
+├── templates/          # Prompt templates (system_prompt.md, crisis_prompt.md)
 ├── tests/              # Pytest suite
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── README.md
+├── .env.example        # Example environment file
+├── alembic.ini         # Alembic configuration
+├── docker-compose.yml  # Docker Compose setup
+├── Dockerfile          # Docker build instructions for the app
+├── requirements.txt    # Main application dependencies
+├── README.md           # This file
 ```
 
 ---
 
 ## 🙌 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new functionality
-4. Submit a pull request
+1.  Fork the repository.
+2.  Create a feature branch (`git checkout -b feature/AmazingFeature`).
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`).
+4.  Push to the Branch (`git push origin feature/AmazingFeature`).
+5.  Open a Pull Request.
 
 ---
 
 ## 📜 License
 
-MIT © dear_future_me
+MIT © Dear Future Me Team (or your chosen license and holder)
+
