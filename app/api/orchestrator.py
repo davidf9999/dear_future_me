@@ -2,9 +2,11 @@ import logging
 from typing import Any, Dict, List
 
 from fastapi import Request
-from langchain.chains import RetrievalQA
-from langchain.chains.combine_documents.stuff import StuffDocumentsChain
-from langchain.chains.llm import LLMChain
+from langchain.chains import RetrievalQA  # Still used for crisis chain
+from langchain.chains import create_retrieval_chain
+
+# Modern chain constructors
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.callbacks.manager import AsyncCallbackManagerForRetrieverRun
@@ -43,8 +45,6 @@ class BranchingChain:
         self.rag_chain = rag_chain
 
     async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        # The 'query' key is the primary input for the Orchestrator's answer method.
-        # We will map it to the specific input keys expected by the crisis or RAG chain.
         query = input_data.get("query")
         if not query:
             logging.error("Query not found in input_data for BranchingChain")
@@ -52,8 +52,10 @@ class BranchingChain:
 
         if self.detect_risk(query):
             logging.warning(f"⚠️  Risk detected: {query!r}")
+            # Crisis chain (RetrievalQA) expects "query"
             return await self.crisis_chain.ainvoke({"query": query})
-        # RAG chain is configured with input_key="input"
+
+        # RAG chain (create_retrieval_chain) by default expects "input"
         return await self.rag_chain.ainvoke({"input": query})
 
 
@@ -78,6 +80,7 @@ class Orchestrator:
             "hopeless",
         ]
 
+        # ── Crisis chain (still using older RetrievalQA for now) ───────────────────
         try:
             plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
             retriever = plan_db.vectordb.as_retriever()
@@ -93,9 +96,7 @@ class Orchestrator:
                     "User query: {query}"
                 )
             crisis_prompt = ChatPromptTemplate.from_template(crisis_md)
-            logging.error(
-                f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt.input_variables}"
-            )  # Temp to ERROR
+            logging.error(f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt.input_variables}")
             self._crisis_chain = RetrievalQA.from_chain_type(
                 llm=ChatOpenAI(model_name=cfg.LLM_MODEL, temperature=0.0),
                 chain_type="stuff",
@@ -104,7 +105,7 @@ class Orchestrator:
                 return_source_documents=False,
             )
             if hasattr(self._crisis_chain, "combine_documents_chain"):
-                logging.error(  # Temp to ERROR
+                logging.error(
                     f"DIAGNOSTIC - Crisis Combine Docs Chain Input Keys: {self._crisis_chain.combine_documents_chain.input_keys}"
                 )
 
@@ -117,6 +118,7 @@ class Orchestrator:
 
             self._crisis_chain = _StubCrisisChain()
 
+        # ── RAG‐QA chain with Future-Me (using modern constructors) ────────────────
         try:
             theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
             plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
@@ -127,26 +129,20 @@ class Orchestrator:
                 retrievers: List[BaseRetriever]
 
                 def _invoke_retrievers_sync(self, query: str) -> List[Document]:
-                    # Synchronous helper for get_relevant_documents
                     docs: List[Document] = []
                     for r_item in self.retrievers:
-                        # Use invoke for synchronous individual retrievers
                         retrieved_docs = r_item.invoke(query)
                         docs.extend(retrieved_docs)
                     return docs
 
                 async def _ainvoke_retrievers_async(self, query: str) -> List[Document]:
-                    # Asynchronous helper for _aget_relevant_documents
                     docs: List[Document] = []
                     for r_item in self.retrievers:
                         retrieved_docs = await r_item.ainvoke(query)
                         docs.extend(retrieved_docs)
                     return docs
 
-                # Synchronous method (still deprecated by LangChain but part of BaseRetriever)
                 def get_relevant_documents(self, query: str) -> List[Document]:
-                    # This method is deprecated in BaseRetriever itself.
-                    # If called, it should use the synchronous invoke.
                     logging.warning(
                         "CombinedRetriever.get_relevant_documents (deprecated) was called. "
                         "Consider using invoke or ainvoke."
@@ -173,36 +169,31 @@ class Orchestrator:
                 system_md = "Based on the following context:\n{context}\n\nAnswer the question: {input}"
 
             rag_prompt = ChatPromptTemplate.from_template(system_md)
-            logging.error(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")  # Temp to ERROR
-            # Explicitly create the LLMChain and StuffDocumentsChain
+            # system_prompt.md should use {input} for the question and {context} for documents
+            logging.error(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")
+
             llm = ChatOpenAI(
                 model_name=cfg.LLM_MODEL,
                 temperature=cfg.LLM_TEMPERATURE,
             )
-            llm_chain_for_rag = LLMChain(llm=llm, prompt=rag_prompt)
-            logging.error(f"DIAGNOSTIC - RAG LLMChain Input Keys: {llm_chain_for_rag.input_keys}")
 
-            combine_documents_chain_for_rag = StuffDocumentsChain(
-                llm_chain=llm_chain_for_rag,
-                document_variable_name="context",  # This should match the variable in rag_prompt for documents
-                # The other input variable for rag_prompt ("input") will be passed from RetrievalQA
-            )
+            # This chain combines the retrieved documents and the question into a single prompt for the LLM
+            question_answer_chain = create_stuff_documents_chain(llm, rag_prompt)
             logging.error(
-                f"DIAGNOSTIC - RAG Explicit Combine Docs Chain Input Keys: {combine_documents_chain_for_rag.input_keys}"
+                f"DIAGNOSTIC - RAG question_answer_chain (stuff_documents_chain) Input Schema Keys: {list(question_answer_chain.input_schema.schema().get('properties').keys()) if hasattr(question_answer_chain, 'input_schema') and hasattr(question_answer_chain.input_schema, 'schema') and question_answer_chain.input_schema.schema().get('properties') else 'N/A (input_schema not as expected)'}"
             )
 
-            self._rag_chain = RetrievalQA(
-                combine_documents_chain=combine_documents_chain_for_rag,
-                retriever=combined_retriever,
-                return_source_documents=False,
-                input_key="input",
+            # This chain handles retrieving documents and then passing them to the question_answer_chain
+            # It expects the user's query under the key "input" by default.
+            self._rag_chain = create_retrieval_chain(
+                retriever=combined_retriever, combine_docs_chain=question_answer_chain
             )
+
         except Exception as e:
             logging.exception(f"Failed to initialize main RAG chain. Using stub. Exception: {e}")
 
             class _StubRagChain:
                 async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-                    # To mimic the error behavior of the original stub's arun
                     raise RuntimeError("RAG chain unavailable")
 
             self._rag_chain = _StubRagChain()
@@ -215,13 +206,14 @@ class Orchestrator:
 
     async def answer(self, query: str) -> str:
         try:
-            # BranchingChain now expects a dictionary.
-            # We pass the raw query under the key "query", and BranchingChain
-            # will adapt it for the specific sub-chain (crisis or RAG).
             response_dict = await self.chain.ainvoke({"query": query})
 
-            return response_dict.get("result", "Error: No result found in chain response.")
-        except RuntimeError as e:  # Catch the specific RuntimeError from the RAG stub
+            # create_retrieval_chain output is a dict with "answer"
+            # Older RetrievalQA (crisis_chain) output is a dict with "result"
+            return response_dict.get("answer") or response_dict.get(
+                "result", "Error: No result found in chain response."
+            )
+        except RuntimeError as e:
             logging.error(f"RuntimeError from RAG chain stub: {e} for query: {query}")
             return "I’m sorry, I’m unable to answer that right now. Please try again later."
         except Exception as e:
@@ -234,6 +226,11 @@ class RagOrchestrator:
     Exposed via /rag/session/{id}/summarize and used as a singleton on app.state.
     """
 
+    # Inner class for the stub, to be accessible for isinstance check
+    class _StubSummarizeChain:
+        async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+            raise RuntimeError("Summarization chain (no QA) unavailable")
+
     def __init__(self):
         cfg = get_settings()
         self.theory_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_THEORY)
@@ -242,8 +239,7 @@ class RagOrchestrator:
         self.future_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_FUTURE)
 
         try:
-            # load_summarize_chain returns a BaseCombineDocumentsChain, which has ainvoke
-            self.summarize_chain = load_summarize_chain(  # Renamed attribute for clarity
+            self.summarize_chain = load_summarize_chain(
                 llm=ChatOpenAI(
                     model_name=cfg.LLM_MODEL,
                     temperature=cfg.LLM_TEMPERATURE,
@@ -252,49 +248,26 @@ class RagOrchestrator:
             )
         except Exception as e:
             logging.exception(f"Failed to initialize summarization chain. Using stub. Exception: {e}")
-
-            class _StubSummarizeChain:
-                async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-                    # Summarization chain's ainvoke output is typically {"output_text": "summary"}
-                    raise RuntimeError("Summarization chain (no QA) unavailable")
-
-            self.summarize_chain = _StubSummarizeChain()
+            self.summarize_chain = RagOrchestrator._StubSummarizeChain()
 
     async def summarize_session(self, session_id: str) -> str:
-        # The load_summarize_chain expects 'input_documents'
-        # This method needs to fetch documents for the session_id first.
         try:
-            # This part needs to be adapted based on how documents for session_id are retrieved.
-            # For example, if session_db can retrieve documents by session_id:
-            # session_content = self.session_db.query(f"content for session {session_id}", k=10) # Fictional query
-            # if not session_content:
-            #     logging.warning(f"No content found for session_id: {session_id} to summarize.")
-            #     return f"No content to summarize for session {session_id}."
-            # docs_to_summarize = session_content # Assuming query returns List[Document]
+            if isinstance(self.summarize_chain, RagOrchestrator._StubSummarizeChain):
+                await self.summarize_chain.ainvoke({})
 
-            # For demonstration, using a placeholder if the stub is not active:
-            if isinstance(self.summarize_chain, self._StubSummarizeChain):
-                # This will be caught by the RuntimeError handler below
-                await self.summarize_chain.ainvoke({})  # Trigger stub's error
-
-            # Placeholder: Actual document retrieval for session_id is needed here
             logging.warning(
                 f"summarize_session for {session_id}: Actual document retrieval and summarization logic needs implementation."
             )
-            # Example of how it might look if you had documents:
-            # docs_to_summarize = [Document(page_content="Example content from session " + session_id)]
+            # Example:
+            # docs_to_summarize = self.session_db.query(f"session_id:{session_id}", k=10) # Fictional
+            # if not docs_to_summarize: return f"No documents for session {session_id}"
             # response_dict = await self.summarize_chain.ainvoke({"input_documents": docs_to_summarize})
-            # return response_dict.get("output_text", f"Summary for {session_id} (error in output).")
+            # return response_dict.get("output_text", f"Summary for {session_id} (error).")
             return f"Summarization for {session_id} is not fully implemented with document retrieval."
 
-        except RuntimeError as e:  # Catch error from stub
+        except RuntimeError as e:
             logging.error(f"Summarization stub error for session {session_id}: {e}")
             return f"Summary for {session_id} (unavailable)"
         except Exception as e:
             logging.exception(f"Error summarizing session: {session_id}, Error: {e!r}")
             return f"Summary for {session_id} (error)"
-
-    # Inner class for the stub, to be accessible for isinstance check
-    class _StubSummarizeChain:
-        async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-            raise RuntimeError("Summarization chain (no QA) unavailable")
