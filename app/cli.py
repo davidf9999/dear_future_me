@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/cli.py
+# app/cli.py
 """
 app/cli.py
 ~~~~~~~~~~
@@ -10,27 +10,37 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
+import sys  # Keep sys for stderr
 import uuid
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import click
-import httpx
+import httpx  # AsyncAPI will use this
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.text import Text
 
-from app.core.settings import get_settings  # For typed access to settings
+# Assuming app.clients.api_client and app.core.settings are findable
+# If running with `python -m app.cli`, Python handles the path.
+# If running `python app/cli.py` directly, ensure project root is in PYTHONPATH or use sys.path manipulation (removed for now for linter).
+from app.clients.api_client import AsyncAPI
+from app.core.settings import Settings, get_settings
 
 # --------------------------------------------------------------------------- #
 # Environment & constants
 # --------------------------------------------------------------------------- #
 
 load_dotenv()
-cfg = get_settings()
+try:
+    cfg: Settings = get_settings()
+except Exception as e:
+    print(f"FATAL: Could not load settings. Check .env file. Error: {e}", file=sys.stderr)
+    sys.exit(1)
+
 
 API_URL = os.getenv("DFM_API_URL", "http://localhost:8000")
-CLIENT_DEMO_MODE = cfg.DEMO_MODE  # For CLI's decision on using demo user
+# CLIENT_DEMO_MODE for CLI now primarily dictates if it tries to use the .env demo user
+CLIENT_DEMO_MODE = cfg.DEMO_MODE
 CURRENT_LANG = cfg.APP_DEFAULT_LANGUAGE
 
 # --------------------------------------------------------------------------- #
@@ -91,106 +101,75 @@ UI_STRINGS = {
     },
 }
 STR = UI_STRINGS.get(CURRENT_LANG, UI_STRINGS["en"])  # Fallback to English if lang not found
+console = Console()  # Global console instance
 
 # --------------------------------------------------------------------------- #
-# Helper HTTP wrapper
+# Authentication Helper for CLI
 # --------------------------------------------------------------------------- #
 
 
-class API:
-    """Thin async wrapper around the HTTP endpoints."""
+async def setup_cli_session_auth(api_client: AsyncAPI) -> Optional[str]:
+    """
+    Handles authentication for the CLI session using the provided AsyncAPI client.
+    If CLIENT_DEMO_MODE is true, attempts to register/login the predefined demo user from settings.
+    Otherwise, registers and logs in a new random temporary user.
+    Returns the token or None if auth fails, and updates api_client._token.
+    """
+    if CLIENT_DEMO_MODE:
+        email = cfg.DEMO_USER_EMAIL
+        password = cfg.DEMO_USER_PASSWORD
+        console.print(STR["attempting_demo_user_setup"].format(email=email))
+    else:
+        email = f"temp_cli_user_{uuid.uuid4().hex[:8]}@example.com"
+        password = "cli_temppassword"
+        console.print(STR["attempting_temp_user_setup"].format(email=email))
 
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/")
-        self._token: Optional[str] = None
-        self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
-
-    async def _post(
-        self,
-        path: str,
-        json: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> httpx.Response:
-        url = f"{self.base_url}{path}"
-        _headers = headers or {}
-        if self._token:
-            _headers["Authorization"] = f"Bearer {self._token}"
-        resp = await self._client.post(url, json=json, data=data, headers=_headers)
-        resp.raise_for_status()
-        return resp
-
-    async def login(self, email: str, password: str):
-        form = {"username": email, "password": password}
-        r = await self._post("/auth/login", data=form)
-        self._token = r.json()["access_token"]
-        return self._token
-
-    async def setup_session_auth(self) -> Optional[str]:
-        if CLIENT_DEMO_MODE:
-            email = cfg.DEMO_USER_EMAIL
-            password = cfg.DEMO_USER_PASSWORD
-            console.print(STR["attempting_demo_user_setup"].format(email=email))
-        else:
-            email = f"temp_cli_user_{uuid.uuid4().hex[:8]}@example.com"
-            password = "cli_temppassword"
-            console.print(STR["attempting_temp_user_setup"].format(email=email))
-
-        try:
-            await self.login(email, password)
-            console.print(STR["login_success"].format(email=email))
-            return self._token
-        except httpx.HTTPStatusError as login_err:
-            if login_err.response.status_code == 400:
-                console.print(
-                    STR["login_failed_attempt_register"].format(email=email, status_code=login_err.response.status_code)
+    try:
+        # Try to login first
+        token = await api_client.login(email, password)
+        console.print(STR["login_success"].format(email=email))
+        return token
+    except httpx.HTTPStatusError as login_err:
+        if login_err.response.status_code == 400:  # Bad credentials or user not found
+            console.print(
+                STR["login_failed_attempt_register"].format(email=email, status_code=login_err.response.status_code)
+            )
+            try:
+                await api_client.register(
+                    email,
+                    password,
+                    first_name="CLI",
+                    last_name="User" if not CLIENT_DEMO_MODE else "Demo",
                 )
-                try:
-                    user_create_payload = {
-                        "email": email,
-                        "password": password,
-                        "first_name": "CLI",
-                        "last_name": "User" if not CLIENT_DEMO_MODE else "Demo",
-                    }
-                    await self._post("/auth/register", json=user_create_payload)
-                    console.print(STR["user_registered_logging_in"].format(email=email))
-                    await self.login(email, password)
-                    console.print(STR["login_success_after_register"].format(email=email))
-                    return self._token
-                except httpx.HTTPStatusError as reg_err:
-                    console.print(
-                        STR["registration_failed"].format(
-                            email=email, status_code=reg_err.response.status_code, text=reg_err.response.text
-                        )
-                    )
-                    return None
-            else:
+                console.print(STR["user_registered_logging_in"].format(email=email))
+                token = await api_client.login(email, password)  # Try login again
+                console.print(STR["login_success_after_register"].format(email=email))
+                return token
+            except httpx.HTTPStatusError as reg_err:
                 console.print(
-                    STR["login_error_other"].format(
-                        email=email, status_code=login_err.response.status_code, text=login_err.response.text
+                    STR["registration_failed"].format(
+                        email=email, status_code=reg_err.response.status_code, text=reg_err.response.text
                     )
                 )
                 return None
-        except Exception as e:
-            console.print(STR["unexpected_auth_error"].format(email=email, error=e))
-            import traceback
-
-            traceback.print_exc()
+        else:  # Other login errors
+            console.print(
+                STR["login_error_other"].format(
+                    email=email, status_code=login_err.response.status_code, text=login_err.response.text
+                )
+            )
             return None
+    except Exception as e:
+        console.print(STR["unexpected_auth_error"].format(email=email, error=e))
+        import traceback
 
-    async def chat(self, message: str) -> str:
-        r = await self._post("/chat/text", json={"message": message})
-        data = r.json()
-        answer = data.get("answer") or data.get("reply")
-        if answer is None:
-            raise RuntimeError(f"Unexpected response payload: {data}")
-        return answer
-
-    async def close(self) -> None:
-        await self._client.aclose()
+        traceback.print_exc(file=sys.stderr)
+        return None
 
 
-console = Console()
+# --------------------------------------------------------------------------- #
+# CLI definition (click)
+# --------------------------------------------------------------------------- #
 
 
 @click.group()
@@ -207,11 +186,13 @@ def cli() -> None:
     help="Base URL of the FastAPI server.",
 )
 def chat(url: str) -> None:
-    api = API(url)
+    """Start an interactive chat session."""
+    api = AsyncAPI(url)  # Instantiate the new AsyncAPI client
 
     async def _run() -> None:
+        # ------------------------------------------------------------------ auth
         try:
-            token = await api.setup_session_auth()
+            token = await setup_cli_session_auth(api)  # Pass the api instance
             if not token:
                 console.print(STR["auth_failed_exit"])
                 console.print(STR["auth_failed_check_server"])
@@ -230,6 +211,7 @@ def chat(url: str) -> None:
         console.print(banner + STR["greeting_banner"])
         console.print(STR["type_exit_prompt"])
 
+        # ------------------------------------------------------------------ loop
         while True:
             try:
                 query = console.input(STR["user_prompt"]).strip()
@@ -241,18 +223,18 @@ def chat(url: str) -> None:
                 console.print(STR["bye_message"])
                 break
 
-            if not query:
+            if not query:  # Skip empty input
                 continue
 
             try:
-                answer = await api.chat(query)
+                answer = await api.chat(query)  # Use the AsyncAPI's chat method
             except httpx.HTTPStatusError as ex_http:
                 console.print(
                     STR["http_error_from_server"].format(
                         status_code=ex_http.response.status_code, text=ex_http.response.text
                     )
                 )
-                if ex_http.response.status_code == 401:
+                if ex_http.response.status_code == 401:  # Unauthorized
                     console.print(STR["session_expired_error"])
             except Exception as ex:
                 console.print(STR["generic_comms_error"])
@@ -261,20 +243,23 @@ def chat(url: str) -> None:
                 import traceback
 
                 traceback.print_exception(ex, file=sys.stderr)
-                break
+                break  # Break on unexpected errors
 
-            console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)  # Keep style for AI prompt
+            console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)
 
-        await api.close()
+        await api.close()  # Use the AsyncAPI's close method
 
     try:
         asyncio.run(_run())
     except RuntimeError as e:
-        if "Event loop is closed" not in str(e):
+        if "Event loop is closed" not in str(e):  # Avoid error if loop already closed
             raise
     finally:
+        # Ensure connection pool closed properly, even if _run had an issue
+        # This might run into "Event loop is closed" if _run already closed it or failed early
         try:
-            if hasattr(api, "_client") and api._client and not api._client.is_closed:  # Check if api and _client exist
+            # Check if api instance was successfully created and has a client to close
+            if "api" in locals() and hasattr(api, "_client") and api._client and not api._client.is_closed:
                 asyncio.run(api.close())
         except RuntimeError as e:
             if "Event loop is closed" not in str(e) and "cannot schedule new futures after shutdown" not in str(e):
@@ -282,5 +267,14 @@ def chat(url: str) -> None:
             pass
 
 
+# --------------------------------------------------------------------------- #
+# Entry-point
+# --------------------------------------------------------------------------- #
+
 if __name__ == "__main__":
+    # To run this CLI directly:
+    # 1. Ensure your project root is in PYTHONPATH or run as a module:
+    #    `python -m app.cli chat`
+    # 2. If running `python app/cli.py` directly, you might need to add
+    #    the project root to sys.path at the top of this file (currently removed for linters).
     cli()

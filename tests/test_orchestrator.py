@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/test_orchestrator.py
+# tests/test_orchestrator.py
 
 import logging  # For capturing log messages
 from unittest.mock import AsyncMock, MagicMock, mock_open

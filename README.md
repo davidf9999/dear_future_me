@@ -144,6 +144,53 @@ Access the API docs (Swagger UI) at http://localhost:8000/docs.
 
 ---
 
+## 🖥️ Quickstart with GUI (Streamlit Web App)
+
+A Streamlit-based web interface is provided for a more user-friendly way to interact with the 'Dear Future Me' chat system. This GUI handles authentication and chat directly in your web browser.
+
+### Prerequisites for Streamlit GUI
+
+* All prerequisites for running the main FastAPI server (Docker/Python, .env configured, etc.).
+* The FastAPI server **must be running** for the Streamlit GUI to connect to it.
+* Streamlit is included in `requirements.txt`.
+
+### Running the Streamlit GUI
+
+1. **Ensure the FastAPI server is running.** (See 'Quickstart' sections above for Docker or local server setup).
+2. **Open a new terminal** in the project root directory.
+3. **(If not using Docker for the main app)** Activate your Python virtual environment if you haven't already:
+
+    ```bash
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
+
+4. **Run the Streamlit application:**
+
+    ```bash
+    streamlit run streamlit_app.py
+    ```
+
+5. Streamlit will typically open the web application automatically in your default browser (usually at `http://localhost:8501`). If not, the terminal output will provide the URL.
+
+### Using the Streamlit GUI
+
+1. **Authentication:**
+    * When you first open the app, you'll see options to **Login** or **Register** in the sidebar.
+    * Enter your email and password.
+    * If `DEMO_MODE=true` is set in your project's `.env` file (this influences the *CLI's* default user and the *server's* DB reset behavior), you can use the `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` defined in your `.env` file to log in. The Streamlit app will attempt to register this user if it's their first time and then log in.
+    * If `DEMO_MODE=false`, you'll need to register a new user first if you haven't already.
+    * Upon successful login, your email will be displayed in the sidebar.
+2. **Chatting:**
+    * Once logged in, the main area of the page will display the chat interface.
+    * Type your message in the input box at the bottom and press Enter or click the send icon.
+    * The conversation will appear, with your messages and responses from your 'Future Self'.
+3. **Language:**
+    * The GUI's display language and the language used for LLM prompts are determined by the `APP_DEFAULT_LANGUAGE` setting in your project's `.env` file (e.g., `he` for Hebrew, `en` for English).
+4. **Logout:**
+    * A 'Logout' button is available in the sidebar to end your session.
+
+---
+
 ## 🗣️ Quickstart with CLI (Interacting with the Server)
 
 The `app/cli.py` provides an interactive command-line interface to chat with the running API server. The `/chat/text` endpoint **always requires authentication**.
