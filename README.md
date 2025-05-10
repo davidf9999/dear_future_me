@@ -157,13 +157,13 @@ The `app/cli.py` provides an interactive command-line interface to chat with the
 5. **Start the interactive chat**:
 
     ```bash
-    python app/cli.py chat
+    python -m app/cli.py chat
     ```
 
     You can also specify the server URL if it's not running on the default `http://localhost:8000`:
 
     ```bash
-    python app/cli.py chat --url http://your-server-address:port
+    python -m app/cli.py chat --url http://your-server-address:port
     ```
 
 * **CLI Authentication Behavior (based on `.env`'s `DEMO_MODE`):**
