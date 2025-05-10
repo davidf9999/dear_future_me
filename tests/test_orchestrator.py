@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, mock_open
 
 import pytest
 from langchain.prompts import ChatPromptTemplate  # For mocking its class method
+from langchain_core.retrievers import BaseRetriever  # For mocking retriever
 
 from app.api.orchestrator import BranchingChain, Orchestrator, RagOrchestrator
 from app.core.settings import Settings  # Import Settings for mocking
@@ -188,12 +189,11 @@ def test_orchestrator_prompt_loading_by_language(
         file_contents["templates/crisis_prompt.en.md"] = "English Crisis Prompt"
         file_contents["templates/system_prompt.en.md"] = "English System Prompt"
 
-    m_open = mock_open()
-
+    # m_open = mock_open() # We will create fresh mocks inside the side_effect
     def open_side_effect(path, *args, **kwargs):
         if path in file_contents:
-            m_open.read_data = file_contents[path]
-            return m_open()
+            # Return a new mock_open object configured with the specific read_data for this path
+            return mock_open(read_data=file_contents[path])(*args, **kwargs)
         # If no files exist at all, Orchestrator uses hardcoded defaults
         if not he_files_exist and not en_files_exist and ("crisis_prompt" in path or "system_prompt" in path):
             # This simulates FileNotFoundError for prompt files, triggering internal defaults
@@ -211,8 +211,17 @@ def test_orchestrator_prompt_loading_by_language(
 
     def mock_from_template_capture(template_content_str, **kwargs):
         actual_prompt_contents_passed.append(template_content_str)
-        # Return a dummy but valid ChatPromptTemplate instance
-        return original_from_template(template="dummy {input}", **kwargs)
+        # Return a ChatPromptTemplate that includes expected variables
+        # to satisfy internal chain validations.
+        # The crisis chain prompt uses {context} and {query}
+        # The RAG chain prompt uses {context} and {input}
+        if "crisis_prompt" in template_content_str.lower() or (
+            expected_crisis_content and expected_crisis_content.lower() in template_content_str.lower()
+        ):
+            # print(f"DEBUG: Creating crisis-like mock prompt for: {template_content_str[:50]}")
+            return original_from_template(template="dummy crisis {context} {query}", **kwargs)
+        # print(f"DEBUG: Creating RAG-like mock prompt for: {template_content_str[:50]}")
+        return original_from_template(template="dummy rag {context} {input}", **kwargs)
 
     monkeypatch.setattr(ChatPromptTemplate, "from_template", mock_from_template_capture)
 
@@ -223,9 +232,17 @@ def test_orchestrator_prompt_loading_by_language(
     # 6. Mock DocumentProcessor to avoid its __init__ side effects (ChromaDB, embeddings)
     mock_dp_instance = MagicMock(spec=DocumentProcessor)
     # Configure the 'vectordb' attribute on the mock_dp_instance itself
-    # to be another MagicMock, which then has an 'as_retriever' method.
+    # to be another MagicMock.
     mock_vectordb = MagicMock()
-    mock_vectordb.as_retriever.return_value = MagicMock()  # This is the actual retriever mock
+
+    # The object returned by as_retriever() needs to be acceptable to CombinedRetriever.
+    # We can make it a MagicMock that also acts like a BaseRetriever.
+    mock_retriever_instance = MagicMock(spec_set=BaseRetriever)  # spec_set is stricter
+    mock_retriever_instance.get_relevant_documents = MagicMock(
+        return_value=[]
+    )  # Implement required abstract methods if any, or ensure spec handles it
+    mock_retriever_instance.aget_relevant_documents = AsyncMock(return_value=[])
+    mock_vectordb.as_retriever.return_value = mock_retriever_instance
     mock_dp_instance.vectordb = mock_vectordb
     monkeypatch.setattr("app.api.orchestrator.DocumentProcessor", lambda ns: mock_dp_instance)
 
@@ -235,7 +252,9 @@ def test_orchestrator_prompt_loading_by_language(
     # 8. Assertions
     # Check that from_template was called with the expected content
     # It will be called twice (once for crisis, once for system)
-    assert len(actual_prompt_contents_passed) >= 2, "ChatPromptTemplate.from_template not called enough times"
+    assert (
+        len(actual_prompt_contents_passed) >= 2
+    ), f"ChatPromptTemplate.from_template not called enough times. Called {len(actual_prompt_contents_passed)} times. Content: {actual_prompt_contents_passed}"
 
     # Check if the expected crisis content was passed to from_template
     assert any(
