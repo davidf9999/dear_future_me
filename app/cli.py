@@ -267,84 +267,77 @@ def ingest(namespace: str, source_dir: str, doc_id_prefix: str, file_extensions:
     help="Base URL of the FastAPI server.",
 )
 async def chat(url: str) -> None:  # Make the command itself async
-    """Start an interactive chat session."""
+    """Start an interactive chat session. The main logic is here."""
     api = AsyncAPI(url)  # Instantiate the new AsyncAPI client
-
-    async def _run_chat_logic() -> None:  # Renamed internal function for clarity
-        # ------------------------------------------------------------------ auth
-        try:
-            token = await setup_cli_session_auth(api)  # Pass the api instance
-            if not token:
-                console.print(STR["auth_failed_exit"])
-                console.print(STR["auth_failed_check_server"])
-                if CLIENT_DEMO_MODE:
-                    console.print(STR["auth_failed_check_env_demo"])
-                return
-
-            user_email_for_banner = cfg.DEMO_USER_EMAIL if CLIENT_DEMO_MODE and api._token else "authenticated user"
-            banner = STR["authenticated_as_banner"].format(email=user_email_for_banner)
-        except Exception as e:
-            console.print(STR["auth_critical_error"].format(error=e))
-            banner = STR["auth_cannot_start"]
-            console.print(banner)
+    # ------------------------------------------------------------------ auth
+    try:
+        token = await setup_cli_session_auth(api)  # Pass the api instance
+        if not token:
+            console.print(STR["auth_failed_exit"])
+            console.print(STR["auth_failed_check_server"])
+            if CLIENT_DEMO_MODE:
+                console.print(STR["auth_failed_check_env_demo"])
             return
 
-        console.print(banner + STR["greeting_banner"])
-        console.print(STR["type_exit_prompt"])
+        user_email_for_banner = cfg.DEMO_USER_EMAIL if CLIENT_DEMO_MODE and api._token else "authenticated user"
+        banner = STR["authenticated_as_banner"].format(email=user_email_for_banner)
+    except Exception as e:
+        console.print(STR["auth_critical_error"].format(error=e))
+        banner = STR["auth_cannot_start"]
+        console.print(banner)
+        # It's important to close the API client if an error occurs before the main loop
+        await api.close()  # Ensure client is closed on early exit
+        return
 
-        # ------------------------------------------------------------------ loop
-        try:
-            while True:
-                try:
-                    query = await asyncio.to_thread(console.input, STR["user_prompt"])
-                    query = query.strip()
-                except (KeyboardInterrupt, EOFError):
-                    console.print(STR["bye_message"])
-                    break
+    console.print(banner + STR["greeting_banner"])
+    console.print(STR["type_exit_prompt"])
 
-                if query.lower() in {"exit", "quit", "צא"}:  # Added Hebrew exit command
-                    console.print(STR["bye_message"])
-                    break
+    # ------------------------------------------------------------------ loop
+    try:
+        while True:
+            try:
+                query = await asyncio.to_thread(console.input, STR["user_prompt"])
+                query = query.strip()
+            except (KeyboardInterrupt, EOFError):  # Handle Ctrl+C or EOF (Ctrl+D) during input
+                console.print(STR["bye_message"])
+                break
 
-                if not query:  # Skip empty input
-                    continue
+            if query.lower() in {"exit", "quit", "צא"}:  # Added Hebrew exit command
+                console.print(STR["bye_message"])
+                break
 
-                try:
-                    answer = await api.chat(query)  # Use the AsyncAPI's chat method
-                except httpx.HTTPStatusError as ex_http:
-                    console.print(
-                        STR["http_error_from_server"].format(
-                            status_code=ex_http.response.status_code, text=ex_http.response.text
-                        )
+            if not query:  # Skip empty input
+                continue
+
+            try:
+                answer = await api.chat(query)  # Use the AsyncAPI's chat method
+            except httpx.HTTPStatusError as ex_http:
+                console.print(
+                    STR["http_error_from_server"].format(
+                        status_code=ex_http.response.status_code, text=ex_http.response.text
                     )
-                    if ex_http.response.status_code == 401:  # Unauthorized
-                        console.print(STR["session_expired_error"])
-                except Exception as ex:  # Catch other exceptions during chat call
-                    console.print(STR["generic_comms_error"])
-                    console.print(STR["details_to_stderr"])
-                    print("----- TRACEBACK -----", file=sys.stderr)
-                    import traceback
+                )
+                if ex_http.response.status_code == 401:  # Unauthorized
+                    console.print(STR["session_expired_error"])
+            except Exception as ex:  # Catch other exceptions during chat call
+                console.print(STR["generic_comms_error"])
+                console.print(STR["details_to_stderr"])
+                print("----- TRACEBACK -----", file=sys.stderr)
+                import traceback
 
-                    traceback.print_exception(ex, file=sys.stderr)
-                    break  # Break on unexpected errors
+                traceback.print_exception(ex, file=sys.stderr)
+                break  # Break on unexpected errors
 
-                console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)
-        finally:
-            await api.close()  # Ensure API client is closed
+            console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)
+    finally:
+        # This ensures the client is closed if the loop breaks for any reason,
+        # or if an exception occurs within the loop that isn't caught internally.
+        if hasattr(api, "_client") and api._client and not api._client.is_closed:
+            await api.close()
 
-    await _run_chat_logic()
 
-
-@cli.result_callback()
-def process_result(result, **kwargs):
-    """
-    Handles the result of a Click command.
-    If an async command was run, Click's default runner awaits it.
-    This callback is mostly for potential future use or cleanup if needed.
-    """
-    # If result is a coroutine, it should have been awaited by Click's runner
-    # for async commands.
-    pass
+# The @cli.result_callback() for process_result is removed as it's not essential
+# for the chat command and might be involved in the warning.
 
 
 # --------------------------------------------------------------------------- #
@@ -352,22 +345,18 @@ def process_result(result, **kwargs):
 # --------------------------------------------------------------------------- #
 
 
-def main():
+def main_entry_point():  # Renamed to avoid confusion with click's own main methods
     """
     Main entry point for the CLI.
     Handles Click's async command execution.
     """
-    # Click's default behavior for `cli.main()` when `cli` contains async commands
-    # is to handle the asyncio event loop.
-    # We pass `standalone_mode=False` if we were to call this programmatically
-    # and manage the loop ourselves, but for direct script execution,
-    # `cli()` or `cli.main()` is usually sufficient.
-    # Let Click manage its own loop for async commands.
-    cli()
+    # For direct script execution, calling the group object is the standard way.
+    # Click (v8+) should detect async commands and manage the event loop.
+    cli(auto_envvar_prefix="DFM")
 
 
 if __name__ == "__main__":
     # To run this CLI directly:
     # `python -m app.cli chat`
     # `python -m app.cli rag ingest --namespace theory --source-dir ./data/theory_docs`
-    main()
+    main_entry_point()
