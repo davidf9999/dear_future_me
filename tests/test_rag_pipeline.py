@@ -1,5 +1,7 @@
 # tests/test_rag_pipeline.py
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from langchain.schema import Document
@@ -128,44 +130,27 @@ def test_chat_rag_endpoint(monkeypatch, client):  # client fixture is used here
 
     monkeypatch.setattr(Orchestrator, "answer", fake_answer)
 
-    # This import is fine here if fastapi_users is only relevant to this test's setup context
-    # from app.auth.router import fastapi_users # Might not be needed if overriding current_active_user
+    # Since /chat/text always requires authentication now, we need to register and login a user.
+    # 1. Create a test user
+    test_user_email = f"test_rag_chat_user_{uuid.uuid4().hex[:8]}@example.com"
+    test_password = "testpassword"
+    register_payload = {"email": test_user_email, "password": test_password}
 
-    # If current_active_user is imported in app.main or app.api.chat,
-    # you might need to mock it where it's imported or ensure the DI override works as expected.
-    # Example: from app.main import current_active_user (if that's its actual location)
+    reg_response = client.post("/auth/register", json=register_payload)
+    assert reg_response.status_code == 201, f"Failed to register test user: {reg_response.text}"
 
-    # Assuming current_active_user is a dependency that can be overridden directly:
-    # If current_active_user is not directly available for import here,
-    # you might need to adjust how it's overridden or ensure your app structure allows it.
-    # For now, assuming this override mechanism works with your DI setup:
-    # from app.main import current_active_user # Adjust this import to the actual location of the dependency
-    def mock_current_active_user():
-        return type(
-            "U",
-            (),
-            {"is_active": True, "id": "test_user_id", "email": "user@example.com"},
-        )()
+    # 2. Log in to get a token
+    login_payload = {"username": test_user_email, "password": test_password}
+    login_response = client.post("/auth/login", data=login_payload)
+    assert login_response.status_code == 200, f"Failed to log in test user: {login_response.text}"
 
-    # How current_active_user is defined and imported in your app determines how to override it.
-    # If it's from `fastapi_users. fastapi_users.current_user(...)`, the override might need to target that.
-    # For this example, I'll assume `app.main.current_active_user` or similar that the router uses.
-    # client.app.dependency_overrides[current_active_user] = mock_current_active_user # Adjust 'current_active_user'
+    token_data = login_response.json()
+    assert "access_token" in token_data, "Access token not found in login response"
+    token = token_data["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
 
-    # If the chat endpoint does not require authentication for DEMO_MODE=true (which seems to be the case from your README)
-    # then the auth override might not be strictly necessary if your tests run in demo mode or if you mock settings.
-    # Given DEMO_MODE=true in .env.example, it's possible auth isn't hit for /chat/text always.
-    # However, the original test includes headers={"Authorization": "Bearer testtoken"},
-    # implying auth is expected to be processed or bypassed.
-
-    # Simplification: If DEMO_MODE=true is default for tests or can be set, auth might be skipped.
-    # If not, the auth override needs to correctly target the dependency used in your chat router.
-
-    res = client.post(
-        "/chat/text",
-        json={"message": "hi there"},
-        # headers={"Authorization": "Bearer testtoken"} # Keep if testing auth path
-    )
+    # 3. Call the chat endpoint with the token
+    res = client.post("/chat/text", headers=headers, json={"message": "hi there"})
     assert res.status_code == 200
     assert res.json()["reply"] == "Echo: hi there"
 
