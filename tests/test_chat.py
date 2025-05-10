@@ -1,4 +1,6 @@
-# tests/test_chat.py
+# /home/dfront/code/dear_future_me/tests/test_chat.py
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,9 +11,10 @@ client = TestClient(app)
 
 
 @pytest.mark.asyncio
-async def test_public_chat_endpoint(monkeypatch):
+async def test_chat_endpoint_authenticated(monkeypatch):
     """
-    Chat endpoints are public in DEMO_MODE, so no auth needed.
+    Tests the /chat/text endpoint with an authenticated user.
+    The endpoint now always requires authentication.
     """
 
     async def mock_answer(self, message: str):
@@ -19,6 +22,31 @@ async def test_public_chat_endpoint(monkeypatch):
 
     monkeypatch.setattr(Orchestrator, "answer", mock_answer)
 
-    resp = client.post("/chat/text", json={"message": "hello"})
-    assert resp.status_code == 200
-    assert resp.json()["reply"].lower().startswith("echo:")
+    # 1. Create a test user
+    test_user_email = f"test_chat_user_{uuid.uuid4().hex[:8]}@example.com"
+    test_password = "testpassword"
+    register_payload = {"email": test_user_email, "password": test_password}
+
+    # Ensure the app is fully initialized for the test client context
+    # This is usually handled by TestClient(app) but let's be explicit if issues persist
+    with TestClient(app) as current_client:
+        reg_response = current_client.post("/auth/register", json=register_payload)
+        assert reg_response.status_code == 201, f"Failed to register test user: {reg_response.text}"
+
+        # 2. Log in to get a token
+        login_payload = {"username": test_user_email, "password": test_password}
+        login_response = current_client.post("/auth/login", data=login_payload)
+        assert login_response.status_code == 200, f"Failed to log in test user: {login_response.text}"
+
+        token_data = login_response.json()
+        assert "access_token" in token_data, "Access token not found in login response"
+        token = token_data["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 3. Call the chat endpoint with the token
+        resp = current_client.post("/chat/text", headers=headers, json={"message": "hello"})
+        assert resp.status_code == 200
+
+        reply_data = resp.json()
+        assert "reply" in reply_data, "Reply key not found in chat response"
+        assert reply_data["reply"].lower().startswith("echo:")

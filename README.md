@@ -146,35 +146,43 @@ Access the API docs (Swagger UI) at http://localhost:8000/docs.
 
 ## 🗣️ Quickstart with CLI (Interacting with the Server)
 
-The `app/cli.py` provides an interactive command-line interface to chat with the running API server.
+The `app/cli.py` provides an interactive command-line interface to chat with the running API server. The `/chat/text` endpoint **always requires authentication**.
 
-1.  **Ensure the server is running** (either via Docker Compose or locally).
-2.  **Open a new terminal** in the project root.
-3.  **(If not using Docker for the CLI)** Activate your virtual environment: `source .venv/bin/activate`
-4.  **Start the interactive chat**:
+1. **Ensure the server is running** (either via Docker Compose or locally).
+2. **Configure Demo User Credentials (for CLI Demo Mode):**
+    * Ensure `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` are set in your `.env` file (see `.env.example`).
+    * The CLI will use these credentials if the `DEMO_MODE` flag in your `.env` file is set to `true` (this flag now primarily influences the CLI's authentication behavior and the server's database reset on startup).
+3. **Open a new terminal** in the project root.
+4. **(If not using Docker for the CLI)** Activate your virtual environment: `source .venv/bin/activate`
+5. **Start the interactive chat**:
+
     ```bash
     python app/cli.py chat
     ```
+
     You can also specify the server URL if it's not running on the default `http://localhost:8000`:
+
     ```bash
     python app/cli.py chat --url http://your-server-address:port
     ```
 
-*   If the server is running with `DEMO_MODE=false` (production mode), the CLI will automatically attempt to register a new temporary demo user and log in for the session.
-*   If `DEMO_MODE=true`, authentication is bypassed for the chat endpoint.
+* **CLI Authentication Behavior (based on `.env`'s `DEMO_MODE`):**
+  * If `DEMO_MODE=true` in `.env`: The CLI will attempt to automatically register (if the user doesn't exist) and then log in using the `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` from your `.env` file.
+  * If `DEMO_MODE=false` in `.env`: The CLI will attempt to register and log in a new, temporary, randomly generated user for the duration of the CLI session.
 
 ---
 
 ## 🎭 Demo Mode vs. Production Mode
 
-Controlled by the `DEMO_MODE` variable in your `.env` file.
+Controlled by the `DEMO_MODE` variable in your `.env` file. This setting primarily affects:
+1.  **Database Initialization on Server Startup:**
+    *   If `DEMO_MODE=true`: The database is reset (tables dropped and recreated) on each application startup. Good for ensuring a clean demo environment.
+    *   If `DEMO_MODE=false`: Database migrations (Alembic) are applied on startup, but data persists.
+2.  **CLI Behavior:**
+    *   If `DEMO_MODE=true` (in the `.env` file read by the CLI): The `app/cli.py` tool will attempt to use the predefined `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` from the `.env` file for authentication.
+    *   If `DEMO_MODE=false`: The `app/cli.py` tool will register and use a new temporary user.
 
-*   **`DEMO_MODE=true`**:
-    *   The `/chat/text` endpoint is public (no authentication required).
-    *   The database is reset (tables dropped and recreated) on each application startup. Good for clean demos.
-*   **`DEMO_MODE=false`** (Production-like):
-    *   The `/chat/text` endpoint requires JWT authentication. Users must register and log in.
-    *   Database migrations are applied on startup, but data persists.
+**Important Security Note:** The `/chat/text` API endpoint **always requires authentication**, regardless of the `DEMO_MODE` setting. This ensures that the API is not publicly exposed without credentials.
 
 ---
 

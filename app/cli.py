@@ -30,15 +30,19 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.text import Text
 
+from app.core.settings import get_settings  # For typed access to settings
+
 # --------------------------------------------------------------------------- #
 # Environment & constants
 # --------------------------------------------------------------------------- #
 
 load_dotenv()  # .env in project root
+cfg = get_settings()  # Load settings once
 
-API_URL = os.getenv("DFM_API_URL", "http://localhost:8000")
-DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
-_DEFAULT_PWD = os.getenv("DFM_DEMO_PASSWORD", "secret")
+API_URL = os.getenv("DFM_API_URL", "http://localhost:8000")  # Can keep this for overriding API_URL via env
+# CLIENT_DEMO_MODE for CLI now primarily dictates if it tries to use the .env demo user
+# This uses the DEMO_MODE from the .env file that the CLI itself reads.
+CLIENT_DEMO_MODE = cfg.DEMO_MODE
 
 
 # --------------------------------------------------------------------------- #
@@ -73,32 +77,76 @@ class API:
 
     # ----------------------------- auth -------------------------------------
 
-    async def login(self, email: str, password: str):  #  -> str: # error: Incompatible return value type
+    async def login(self, email: str, password: str):
         form = {"username": email, "password": password}
         r = await self._post("/auth/login", data=form)
         self._token = r.json()["access_token"]
         return self._token
 
-    async def register_demo_user(self) -> str:
-        """Registers a random user & immediately logs in."""
-        email = f"demo_{uuid.uuid4()}@example.com"
-        pwd = _DEFAULT_PWD
+    async def setup_session_auth(self) -> Optional[str]:
+        """
+        Handles authentication for the CLI session.
+        If CLIENT_DEMO_MODE is true, attempts to register/login the predefined demo user from settings.
+        Otherwise, registers and logs in a new random temporary user.
+        Returns the token or None if auth fails.
+        """
+        if CLIENT_DEMO_MODE:
+            email = cfg.DEMO_USER_EMAIL
+            password = cfg.DEMO_USER_PASSWORD
+            console.print(f"[dim]CLIENT_DEMO_MODE is True. Attempting to use predefined demo user: {email}...[/dim]")
+        else:
+            email = f"temp_cli_user_{uuid.uuid4().hex[:8]}@example.com"
+            password = "cli_temppassword"
+            console.print(
+                f"[dim]CLIENT_DEMO_MODE is False. Attempting to register/login temporary user: {email}...[/dim]"
+            )
+
         try:
-            # Registration may fail (if DEMO_MODE disables auth), so ignore errors.
-            await self._post("/auth/register", json={"email": email, "password": pwd})
-        except httpx.HTTPStatusError:
-            pass
-        return await self.login(email, pwd)
+            # Try to login first
+            await self.login(email, password)
+            console.print(f"[green]Successfully logged in as {email}[/green]")
+            return self._token
+        except httpx.HTTPStatusError as login_err:
+            # FastAPI-Users returns 400 for bad credentials / user not found during login
+            if login_err.response.status_code == 400:
+                console.print(
+                    f"[yellow]Login failed for {email} (status {login_err.response.status_code}). Attempting to register...[/yellow]"
+                )
+                try:
+                    # Provide some default names for registration
+                    user_create_payload = {
+                        "email": email,
+                        "password": password,
+                        "first_name": "CLI",
+                        "last_name": "User" if not CLIENT_DEMO_MODE else "Demo",
+                    }
+                    await self._post("/auth/register", json=user_create_payload)
+                    console.print(f"[green]User {email} registered. Logging in...[/green]")
+                    await self.login(email, password)  # Try login again after registration
+                    console.print(f"[green]Successfully logged in as {email} after registration[/green]")
+                    return self._token
+                except httpx.HTTPStatusError as reg_err:
+                    console.print(
+                        f"[red]Registration for {email} failed (status {reg_err.response.status_code}): {reg_err.response.text}[/red]"
+                    )
+                    return None
+            else:  # Other login errors
+                console.print(
+                    f"[red]Login error for {email} (status {login_err.response.status_code}): {login_err.response.text}[/red]"
+                )
+                return None
+        except Exception as e:
+            console.print(f"[red]Unexpected error during auth setup for {email}: {e}[/red]")
+            import traceback
+
+            traceback.print_exc()
+            return None
 
     # ----------------------------- business ---------------------------------
 
     async def chat(self, message: str) -> str:
         r = await self._post("/chat/text", json={"message": message})
         data = r.json()
-        # if "answer" not in data:
-        #     # Backend returned something unexpected – surface to user & dev log.
-        #     raise RuntimeError(f"Unexpected response payload: {data}")
-        # return data["answer"]
         answer = data.get("answer") or data.get("reply")
         if answer is None:
             raise RuntimeError(f"Unexpected response payload: {data}")
@@ -134,17 +182,35 @@ def chat(url: str) -> None:  # pragma: no cover
 
     async def _run() -> None:
         # ------------------------------------------------------------------ auth
-        token: Optional[str] = None
-        if not DEMO_MODE:
-            token = await api.register_demo_user()
-        banner = f"[bold green]Logged in as {token}[/bold green]\n" if token else ""
+        try:
+            token = await api.setup_session_auth()
+            if not token:
+                console.print("[bold red]Authentication failed. Cannot start chat session. Exiting.[/bold red]")
+                console.print(
+                    "[bold yellow]Please check server logs and ensure the server is running and accessible.[/bold yellow]"
+                )
+                if CLIENT_DEMO_MODE:
+                    console.print(
+                        f"[bold yellow]Ensure DEMO_USER_EMAIL ({cfg.DEMO_USER_EMAIL}) and DEMO_USER_PASSWORD are correctly set in your .env file if using CLIENT_DEMO_MODE.[/bold yellow]"
+                    )
+                return
+
+            user_email_for_banner = (
+                cfg.DEMO_USER_EMAIL if CLIENT_DEMO_MODE and api._token else "authenticated user"
+            )  # Fallback if token somehow not set
+            banner = f"[bold green]Authenticated as {user_email_for_banner}[/bold green]\n"
+        except Exception as e:
+            console.print(f"[bold red]Critical error during authentication setup: {e}[/bold red]")
+            banner = "[bold red]Could not authenticate. Chat session cannot start.[/bold red]\n"
+            console.print(banner)
+            return
+
         console.print(banner + "[bold]Dear-Future-Me interactive chat[/bold]")
         console.print("Type 'exit' to quit.\n")
 
         # ------------------------------------------------------------------ loop
         while True:
             try:
-                # query = Prompt.ask(Text("you:", style="bold bright_white")).strip()
                 query = console.input("[bold cyan]you:[/bold cyan] ").strip()
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[bold]Bye![/bold]")
@@ -153,26 +219,51 @@ def chat(url: str) -> None:  # pragma: no cover
             if query.lower() in {"exit", "quit"}:
                 break
 
+            if not query:  # Skip empty input
+                continue
+
             try:
                 answer = await api.chat(query)
+            except httpx.HTTPStatusError as ex_http:
+                console.print(
+                    f"[bold red]Oops! HTTP error from server: {ex_http.response.status_code} - {ex_http.response.text}[/bold red]"
+                )
+                if ex_http.response.status_code == 401:  # Unauthorized
+                    console.print(
+                        "[bold yellow]Your session might have expired or token is invalid. Try restarting the CLI.[/bold yellow]"
+                    )
+                # For other HTTP errors, we might want to break or allow retry
+                # break
             except Exception as ex:  # noqa: BLE001
-                console.print("[bold red]Oops! Something went wrong on the server side.[/bold red]")
+                console.print(
+                    "[bold red]Oops! Something went wrong on the server side or during communication.[/bold red]"
+                )
                 console.print("(Details logged to stderr)")
                 print("----- TRACEBACK -----", file=sys.stderr)
                 import traceback
 
                 traceback.print_exception(ex, file=sys.stderr)
-                break
+                break  # Break on unexpected errors
 
             console.print(Text("ai:", style="bold cyan"), answer)
 
+        await api.close()
+
     try:
         asyncio.run(_run())
+    except RuntimeError as e:  # Catch asyncio's "Event loop is closed" if _run() itself raises early
+        if "Event loop is closed" not in str(e):
+            raise  # Re-raise if it's not the specific loop closure error
     finally:
-        # Ensure connection pool closed properly
+        # Ensure connection pool closed properly, even if _run had an issue
+        # This might run into "Event loop is closed" if _run already closed it or failed early
         try:
-            asyncio.run(api.close())
-        except RuntimeError:
+            if not api._client.is_closed:
+                asyncio.run(api.close())
+        except RuntimeError as e:
+            if "Event loop is closed" not in str(e) and "cannot schedule new futures after shutdown" not in str(e):
+                # Log or print if it's a different runtime error during close
+                print(f"Note: Error during final API client close: {e}", file=sys.stderr)
             pass
 
 

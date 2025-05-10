@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
     # ── Flags ─────────────────────────────────────────────────
-    DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")
+    DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")  # Server's DEMO_MODE, e.g., for DB reset
     DEBUG_SQL: bool = Field(False, validation_alias="DEBUG_SQL")
 
     # ── Chat settings ─────────────────────────────────────────
@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(validation_alias="OPENAI_API_KEY")
     LLM_MODEL: str = "gpt-4o"
     LLM_TEMPERATURE: float = 0.7
+
+    # Demo user credentials (primarily for client tools like cli.py)
+    DEMO_USER_EMAIL: str = Field("demouser@example.com", validation_alias="DEMO_USER_EMAIL")
+    DEMO_USER_PASSWORD: str = Field("demopassword123", validation_alias="DEMO_USER_PASSWORD")
 
 
 @lru_cache(maxsize=1)

@@ -55,11 +55,8 @@ app.include_router(
     tags=["users"],
 )
 
-# Chat endpoints (public in demo, protected in prod)
-if cfg.DEMO_MODE:
-    app.include_router(chat_router)
-else:
-    app.include_router(chat_router, dependencies=[Depends(current_active_user)])
+# Chat endpoints - ALWAYS protected
+app.include_router(chat_router, dependencies=[Depends(current_active_user)])
 
 # RAG endpoints
 app.include_router(rag_router)
