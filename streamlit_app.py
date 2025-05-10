@@ -114,18 +114,23 @@ if st.session_state.current_language == "he":
     st.markdown(
         """
         <style>
-        /* Main app container */
-        .stApp {
+        /* Make main content area RTL */
+        div[data-testid="stAppViewContainer"] > section[data-testid="stVerticalBlock"] > div.block-container {
             direction: rtl;
         }
-        /* Sidebar content */
+        /* Make sidebar *content* RTL, but sidebar itself still opens from left */
         .stSidebar section[data-testid="stSidebarUserContent"] {
             direction: rtl;
         }
-        /* Ensure text inputs and chat inputs are RTL */
+        /* Ensure text inputs, text areas, and chat inputs are RTL for text entry */
         div[data-testid="stTextInput"] input, 
         div[data-testid="stTextArea"] textarea, /* For multiline inputs if any */
         div[data-testid="stChatInput"] textarea {
+            direction: rtl;
+            text-align: right;
+        }
+        /* Specific for chat messages to ensure they align right */
+        div[data-testid="stChatMessage"] {
             direction: rtl;
             text-align: right;
         }
@@ -189,10 +194,11 @@ with st.sidebar:
 
     st.sidebar.markdown("---")  # Separator
     # Add a link to the README on GitHub (replace with your actual repo URL)
-    readme_url = (
-        "https://github.com/dfront/dear_future_me/blob/main/README.md"  # FIXME: Update with your actual repo URL
-    )
-    st.sidebar.markdown(f"[{STR.get('help_link_text', 'Help / Readme')}]({readme_url})")
+    # Uncomment if the repo will be public
+    # readme_url = (
+    #     "https://github.com/dfront/dear_future_me/blob/main/README.md"  # FIXME: Update with your actual repo URL
+    # )
+    # st.sidebar.markdown(f"[{STR.get('help_link_text', 'Help / Readme')}]({readme_url})")
 
 
 # --- Chat Section (Main Area) ---
