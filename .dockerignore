@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Add any other large directories or files not needed for the Docker image
+node_modules/ # If you had frontend stuff
+build/
+dist/
+*.log
+local_data_not_for_image/
