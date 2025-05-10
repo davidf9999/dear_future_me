@@ -8,11 +8,8 @@ from fastapi.testclient import TestClient
 
 from app.auth.router import get_jwt_strategy
 from app.core.settings import get_settings
-from app.db.session import (  # engine was locally imported
-    AsyncSessionMaker,
-    engine,
-    get_async_session,
-)
+from app.db.session import AsyncSessionMaker  # engine was locally imported
+from app.db.session import engine, get_async_session
 from app.main import app
 
 
