@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain.schema import Document  # Add this import at the top of your test file
+from langchain.schema import Document
 
 from app.api.orchestrator import Orchestrator, RagOrchestrator, get_rag_orchestrator
 from app.main import (

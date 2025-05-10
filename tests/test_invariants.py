@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 
 from app.auth.router import get_jwt_strategy
 from app.core.settings import get_settings
-from app.db.session import AsyncSessionMaker, get_async_session
+from app.db.session import (  # engine was locally imported
+    AsyncSessionMaker,
+    engine,
+    get_async_session,
+)
 from app.main import app
 
 
@@ -27,8 +31,7 @@ def test_jwt_strategy_secret_matches_settings():
 # ──────────────────────────  DB invariants  ────────────────────────────
 @pytest.mark.asyncio
 async def test_singleton_engine():
-    from app.db.session import engine  # local import to avoid early side-effects
-
+    # engine is now imported at the top
     # async_sessionmaker stores constructor args in .kw
     assert AsyncSessionMaker.kw.get("bind") is engine
 
