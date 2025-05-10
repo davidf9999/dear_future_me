@@ -142,10 +142,11 @@ if st.session_state.current_language == "he":
             text-align: right; /* Markdown content */
         }
         /* Target labels of widgets like st.text_input in the sidebar */
-        .stSidebar div[data-testid="stWidgetLabel"] label {
+        .stSidebar div[data-testid="stTextInput"] label { /* Changed selector to target label within stTextInput */
             direction: rtl; /* Ensure label text flows RTL */
             text-align: right; /* Align label text to the right */
-            width: 100%; /* Make label take full width to allow text-align to work */
+            display: block; /* Make the label a block element to take full width */
+            /* width: 100%; /* May not be needed if display: block is used */
         }
         /* You might need to add more specific selectors if some elements still misbehave */
         </style>
