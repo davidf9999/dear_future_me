@@ -141,6 +141,12 @@ if st.session_state.current_language == "he":
         .stSidebar div[data-testid="stMarkdownContainer"] {
             text-align: right; /* Markdown content */
         }
+        /* Target labels of widgets like st.text_input in the sidebar */
+        .stSidebar div[data-testid="stWidgetLabel"] label {
+            direction: rtl; /* Ensure label text flows RTL */
+            text-align: right; /* Align label text to the right */
+            width: 100%; /* Make label take full width to allow text-align to work */
+        }
         /* You might need to add more specific selectors if some elements still misbehave */
         </style>
     """,
