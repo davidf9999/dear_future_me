@@ -1,11 +1,12 @@
+# /home/dfront/code/dear_future_me/app/api/orchestrator.py
 import logging
+import os  # Added for path joining
 from typing import Any, Dict, List
 
 from fastapi import Request
-from langchain.chains import RetrievalQA  # Still used for crisis chain
-from langchain.chains import create_retrieval_chain
 
 # Modern chain constructors
+from langchain.chains import RetrievalQA, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import ChatPromptTemplate
@@ -68,8 +69,9 @@ class Orchestrator:
 
     def __init__(self):
         cfg = get_settings()
+        self.current_lang = cfg.APP_DEFAULT_LANGUAGE  # Store current language
 
-        self._risk_keywords = [
+        self._risk_keywords = [  # These keywords might also need translation or language-specific versions
             "suicide",
             "kill myself",
             "die",
@@ -78,16 +80,29 @@ class Orchestrator:
             "no reason to live",
             "worthless",
             "hopeless",
+            # Consider adding Hebrew equivalents if _detect_risk becomes language-aware
         ]
+
+        # --- Load prompts based on language ---
+        crisis_prompt_file = f"templates/crisis_prompt.{self.current_lang}.md"
+        system_prompt_file = f"templates/system_prompt.{self.current_lang}.md"
+
+        if not os.path.exists(crisis_prompt_file):
+            logging.warning(f"{crisis_prompt_file} not found. Falling back to English crisis_prompt.md")
+            crisis_prompt_file = "templates/crisis_prompt.md"  # Fallback to default English
+
+        if not os.path.exists(system_prompt_file):
+            logging.warning(f"{system_prompt_file} not found. Falling back to English system_prompt.md")
+            system_prompt_file = "templates/system_prompt.md"  # Fallback to default English
 
         # ── Crisis chain (still using older RetrievalQA for now) ───────────────────
         try:
             plan_db = DocumentProcessor(cfg.CHROMA_NAMESPACE_PLAN)
             retriever = plan_db.vectordb.as_retriever()
             try:
-                crisis_md = open("templates/crisis_prompt.md", encoding="utf-8").read()
+                crisis_md = open(crisis_prompt_file, encoding="utf-8").read()
             except FileNotFoundError:
-                logging.warning("templates/crisis_prompt.md not found. Using default crisis prompt string.")
+                logging.error(f"{crisis_prompt_file} not found! Using default crisis prompt string.")
                 crisis_md = (
                     "You are a crisis responder. When the user expresses self-harm intent, "
                     "reply with exactly one coping step from their personal safety plan "
@@ -95,13 +110,13 @@ class Orchestrator:
                     "Relevant information from safety plan:\n{context}\n\n"
                     "User query: {query}"
                 )
-            crisis_prompt = ChatPromptTemplate.from_template(crisis_md)
-            logging.info(f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt.input_variables}")
+            crisis_prompt_template = ChatPromptTemplate.from_template(crisis_md)
+            logging.info(f"DIAGNOSTIC - Crisis Prompt Input Variables: {crisis_prompt_template.input_variables}")
             self._crisis_chain = RetrievalQA.from_chain_type(
                 llm=ChatOpenAI(model_name=cfg.LLM_MODEL, temperature=0.0),
                 chain_type="stuff",
                 retriever=retriever,
-                chain_type_kwargs={"prompt": crisis_prompt},
+                chain_type_kwargs={"prompt": crisis_prompt_template},
                 return_source_documents=False,
             )
             if hasattr(self._crisis_chain, "combine_documents_chain"):
@@ -168,9 +183,6 @@ class Orchestrator:
                         docs.extend(retrieved_docs)
                     return docs
 
-                # The old get_relevant_documents and its async helper can be removed.
-                # BaseRetriever expects _get_relevant_documents and _aget_relevant_documents.
-
             actual_retrievers_list = [
                 theory_db.vectordb.as_retriever(),
                 plan_db.vectordb.as_retriever(),
@@ -180,28 +192,24 @@ class Orchestrator:
             combined_retriever = CombinedRetriever(retrievers=actual_retrievers_list)
 
             try:
-                system_md = open("templates/system_prompt.md", encoding="utf-8").read()
+                system_md = open(system_prompt_file, encoding="utf-8").read()
             except FileNotFoundError:
-                logging.error("templates/system_prompt.md not found! RAG chain will use a basic default prompt.")
+                logging.error(f"{system_prompt_file} not found! RAG chain will use a basic default prompt.")
                 system_md = "Based on the following context:\n{context}\n\nAnswer the question: {input}"
 
-            rag_prompt = ChatPromptTemplate.from_template(system_md)
-            # system_prompt.md should use {input} for the question and {context} for documents
-            logging.info(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt.input_variables}")
+            rag_prompt_template = ChatPromptTemplate.from_template(system_md)
+            logging.info(f"DIAGNOSTIC - RAG Prompt Input Variables: {rag_prompt_template.input_variables}")
 
             llm = ChatOpenAI(
                 model_name=cfg.LLM_MODEL,
                 temperature=cfg.LLM_TEMPERATURE,
             )
 
-            # This chain combines the retrieved documents and the question into a single prompt for the LLM
-            question_answer_chain = create_stuff_documents_chain(llm, rag_prompt)
+            question_answer_chain = create_stuff_documents_chain(llm, rag_prompt_template)
             logging.info(
                 f"DIAGNOSTIC - RAG question_answer_chain (stuff_documents_chain) Input Schema Keys: {list(question_answer_chain.input_schema.model_json_schema().get('properties').keys()) if hasattr(question_answer_chain, 'input_schema') and hasattr(question_answer_chain.input_schema, 'model_json_schema') and question_answer_chain.input_schema.model_json_schema().get('properties') else 'N/A (input_schema not as expected)'}"
             )
 
-            # This chain handles retrieving documents and then passing them to the question_answer_chain
-            # It expects the user's query under the key "input" by default.
             self._rag_chain = create_retrieval_chain(
                 retriever=combined_retriever, combine_docs_chain=question_answer_chain
             )
@@ -218,15 +226,14 @@ class Orchestrator:
         self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
     def _detect_risk(self, text: str) -> bool:
+        # For true multilingual risk detection, this would need to be more sophisticated
+        # or use language-specific keyword lists.
         txt = text.lower()
         return any(kw in txt for kw in self._risk_keywords)
 
     async def answer(self, query: str) -> str:
         try:
             response_dict = await self.chain.ainvoke({"query": query})
-
-            # create_retrieval_chain output is a dict with "answer"
-            # Older RetrievalQA (crisis_chain) output is a dict with "result"
             return response_dict.get("answer") or response_dict.get(
                 "result", "Error: No result found in chain response."
             )
@@ -243,7 +250,6 @@ class RagOrchestrator:
     Exposed via /rag/session/{id}/summarize and used as a singleton on app.state.
     """
 
-    # Inner class for the stub, to be accessible for isinstance check
     class _StubSummarizeChain:
         async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
             raise RuntimeError("Summarization chain (no QA) unavailable")
@@ -269,13 +275,10 @@ class RagOrchestrator:
 
     async def summarize_session(self, session_id: str) -> str:
         try:
-            # The _StubSummarizeChain's ainvoke will raise RuntimeError, caught below.
             logging.info(f"summarize_session for {session_id}: Attempting to use summarize_chain.")
-            # TODO: Actual document retrieval logic needs implementation.
-            # For now, using a dummy document to allow the chain to be called.
             docs_to_summarize = [Document(page_content=f"Content for session {session_id}.")]
 
-            if not docs_to_summarize:  # Or if actual retrieval yields no docs
+            if not docs_to_summarize:
                 return f"No documents found for session {session_id} to summarize."
 
             response_dict = await self.summarize_chain.ainvoke({"input_documents": docs_to_summarize})
@@ -289,7 +292,7 @@ class RagOrchestrator:
                 )
                 return f"Summary for {session_id} (error in processing)."
 
-        except RuntimeError as e:  # Catches RuntimeError from _StubSummarizeChain or a mocked chain
+        except RuntimeError as e:
             logging.error(f"Summarization chain runtime error for session {session_id}: {e}")
             return f"Summary for {session_id} (unavailable)"
         except Exception as e:

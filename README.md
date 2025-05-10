@@ -148,22 +148,24 @@ Access the API docs (Swagger UI) at http://localhost:8000/docs.
 
 The `app/cli.py` provides an interactive command-line interface to chat with the running API server. The `/chat/text` endpoint **always requires authentication**.
 
+The CLI will attempt to use the language specified by `APP_DEFAULT_LANGUAGE` in your `.env` file for its interface (defaulting to English if the specified language or strings are not found). For the demo, it's recommended to set `APP_DEFAULT_LANGUAGE=he` for a Hebrew interface.
+
 1. **Ensure the server is running** (either via Docker Compose or locally).
-2. **Configure Demo User Credentials (for CLI Demo Mode):**
-    * Ensure `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` are set in your `.env` file (see `.env.example`).
-    * The CLI will use these credentials if the `DEMO_MODE` flag in your `.env` file is set to `true` (this flag now primarily influences the CLI's authentication behavior and the server's database reset on startup).
+2. **Configure Demo User Credentials & Language (for CLI Demo Mode):**
+    * Ensure `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD`, and `APP_DEFAULT_LANGUAGE` (e.g., `he`) are set in your `.env` file (see `.env.example`).
+    * The CLI will use these credentials if the `DEMO_MODE` flag in your `.env` file is set to `true`.
 3. **Open a new terminal** in the project root.
 4. **(If not using Docker for the CLI)** Activate your virtual environment: `source .venv/bin/activate`
 5. **Start the interactive chat**:
 
     ```bash
-    python -m app/cli.py chat
+    python -m app.cli chat
     ```
 
     You can also specify the server URL if it's not running on the default `http://localhost:8000`:
 
     ```bash
-    python -m app/cli.py chat --url http://your-server-address:port
+    python -m app.cli chat --url http://your-server-address:port
     ```
 
 * **CLI Authentication Behavior (based on `.env`'s `DEMO_MODE`):**
@@ -172,17 +174,30 @@ The `app/cli.py` provides an interactive command-line interface to chat with the
 
 ---
 
-## 🎭 Demo Mode vs. Production Mode
+## 🎭 Demo Mode vs. Production Mode (Server Behavior) & Language
 
-Controlled by the `DEMO_MODE` variable in your `.env` file. This setting primarily affects:
-1.  **Database Initialization on Server Startup:**
-    *   If `DEMO_MODE=true`: The database is reset (tables dropped and recreated) on each application startup. Good for ensuring a clean demo environment.
-    *   If `DEMO_MODE=false`: Database migrations (Alembic) are applied on startup, but data persists.
-2.  **CLI Behavior:**
-    *   If `DEMO_MODE=true` (in the `.env` file read by the CLI): The `app/cli.py` tool will attempt to use the predefined `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` from the `.env` file for authentication.
-    *   If `DEMO_MODE=false`: The `app/cli.py` tool will register and use a new temporary user.
+The behavior of the server and client tools can be influenced by variables in your `.env` file.
 
-**Important Security Note:** The `/chat/text` API endpoint **always requires authentication**, regardless of the `DEMO_MODE` setting. This ensures that the API is not publicly exposed without credentials.
+**Server Behavior (based on `.env`'s `DEMO_MODE` when the server starts):**
+
+* **`DEMO_MODE=true` on Server Startup:**
+  * The database is reset (tables dropped and recreated) on each application startup. This is useful for ensuring a clean environment for demonstrations.
+* **`DEMO_MODE=false` on Server Startup (Production-like):**
+  * Database migrations (Alembic) are applied on startup to bring the schema to the latest version, but existing data persists.
+
+**Language Configuration (based on `.env`'s `APP_DEFAULT_LANGUAGE`):**
+
+* The `APP_DEFAULT_LANGUAGE` setting in `.env` (e.g., `he` for Hebrew, `en` for English) determines:
+  * The default language for the `app/cli.py` user interface.
+  * The language of the LLM prompt templates (`system_prompt.*.md`, `crisis_prompt.*.md`) loaded by the server. This heavily influences the language of the LLM's responses.
+  * For the demo, setting `APP_DEFAULT_LANGUAGE=he` is recommended.
+
+**Important Security Note:**
+The `/chat/text` API endpoint (and other sensitive endpoints) **always require authentication**, regardless of the server's `DEMO_MODE` setting. This ensures that the API is not publicly exposed without valid credentials.
+
+**CLI Behavior (based on `.env`'s `DEMO_MODE` when the CLI starts):**
+
+* See the "Quickstart with CLI" section above for details on how the CLI uses the `DEMO_MODE` setting from `.env` to determine its authentication strategy (predefined demo user vs. temporary user).
 
 ---
 

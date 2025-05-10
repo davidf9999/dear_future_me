@@ -1,4 +1,4 @@
-# app/core/settings.py
+# /home/dfront/code/dear_future_me/app/core/settings.py
 """
 Central settings – now using **Pydantic-v2 native** syntax.
 
@@ -10,6 +10,7 @@ Key changes
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     # Demo user credentials (primarily for client tools like cli.py)
     DEMO_USER_EMAIL: str = Field("demouser@example.com", validation_alias="DEMO_USER_EMAIL")
     DEMO_USER_PASSWORD: str = Field("demopassword123", validation_alias="DEMO_USER_PASSWORD")
+
+    # ── Language Settings ─────────────────────────────────────
+    APP_DEFAULT_LANGUAGE: Literal["en", "he"] = Field("he", validation_alias="APP_DEFAULT_LANGUAGE")
 
 
 @lru_cache(maxsize=1)
