@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.api.orchestrator import Orchestrator, RagOrchestrator
+from app.api.orchestrator import BranchingChain, Orchestrator, RagOrchestrator
 
 
 @pytest.mark.asyncio
@@ -16,6 +16,8 @@ async def test_non_risk_uses_rag_chain(monkeypatch):
     mock_rag_chain.ainvoke = AsyncMock(return_value={"answer": "RAG→OK"})
 
     monkeypatch.setattr(orch, "_rag_chain", mock_rag_chain)
+    # CRUCIAL FIX: Re-initialize orch.chain to use the mocked _rag_chain
+    orch.chain = BranchingChain(orch._detect_risk, orch._crisis_chain, orch._rag_chain)
 
     assert await orch.answer("hello") == "RAG→OK"
 
@@ -29,6 +31,9 @@ async def test_risk_uses_crisis_chain(monkeypatch):
     mock_crisis_chain.ainvoke = AsyncMock(return_value={"result": "CRISIS!!!"})
 
     monkeypatch.setattr(orch, "_crisis_chain", mock_crisis_chain)
+    # CRUCIAL FIX: Re-initialize orch.chain to use the mocked _crisis_chain
+    # Note: We also pass the potentially already mocked orch._rag_chain or the original one if not mocked in this specific test's scope.
+    orch.chain = BranchingChain(orch._detect_risk, orch._crisis_chain, orch._rag_chain)
 
     assert await orch.answer("I want to die") == "CRISIS!!!"
 
