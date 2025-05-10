@@ -79,38 +79,58 @@ flowchart TD
 
 ---
 
-## 🚀 Quickstart
+## 🚀 Quickstart with Docker Compose (Recommended)
+
+This is the recommended way to run the entire Dear Future Me application stack, including the FastAPI backend, ChromaDB vector store, and the Streamlit GUI.
 
 ### Prerequisites
 
-*   Docker
-*   Docker Compose (Recommended for running with ChromaDB)
-*   Python 3.11+ (for local development without Docker)
-*   A valid OpenAI API key.
+* [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+* A `.env` file configured in the project root (you can start by copying `.env.example` to `.env` and adjusting the values if necessary).
 
-### Setup `.env`
+### Running the Application
 
-1.  Clone the repository:
+1. **Clone the repository** (if you haven't already):
+
     ```bash
-    git clone https://github.com/your-org/dear_future_me.git # Replace with your repo URL
+    git clone <your-repo-url>
     cd dear_future_me
     ```
-2.  Copy the example environment file and configure it:
+
+2. **Ensure your `.env` file is configured.** Pay special attention to:
+    * `OPENAI_API_KEY` (if using OpenAI for embeddings/LLM)
+    * `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` (if `DEMO_MODE=true`)
+    * `APP_DEFAULT_LANGUAGE` (e.g., `en` or `he`)
+
+3. **Build and start all services using Docker Compose:**
+    From the project root directory, run:
+
     ```bash
-    cp .env.example .env
+    docker compose up --build
     ```
-3.  Edit `.env` to set your `SECRET_KEY`, `DATABASE_URL` (if not using the default SQLite), and especially your `OPENAI_API_KEY`.
-    *   To generate a `SECRET_KEY`: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-### Option 1: Running with Docker Compose (Recommended)
+    * The `--build` flag is only necessary the first time you run this command or after you've made changes to your `Dockerfile` or application code dependencies. For subsequent runs, `docker compose up` is usually sufficient.
+    * This command will:
+        * Build the Docker image for your application (if it doesn't exist or if `--build` is used).
+        * Pull the ChromaDB image.
+        * Create a Docker network for the services.
+        * Start the ChromaDB, FastAPI (`web`), and Streamlit (`streamlit`) services.
 
-This starts the FastAPI application and a ChromaDB vector store.
+4. **Access the applications:**
+    * **FastAPI Backend API:** `http://localhost:8000` (e.g., `http://localhost:8000/ping` or `http://localhost:8000/docs` for API documentation)
+    * **Streamlit GUI:** `http://localhost:8501`
+    * **ChromaDB (if needed for direct inspection, though not typical for users):** `http://localhost:8001` (as per your `docker-compose.yml` port mapping for Chroma)
 
-```bash
-docker-compose up --build -d
-```
+5. **To stop the application:**
+    Press `Ctrl+C` in the terminal where `docker compose up` is running. To remove the containers, you can then run:
 
-### Option 2: Running Locally (without Docker for ChromaDB)
+    ```bash
+    docker compose down
+    ```
+
+---
+
+### Alternative: Running Locally (without Docker for ChromaDB)
 
 This is suitable if you want to run ChromaDB separately or use an in-memory version for quick tests (requires code changes in `DocumentProcessor` for non-persistent Chroma). The default setup persists Chroma data to `./chroma_data`.
 
