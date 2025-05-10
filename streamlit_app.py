@@ -117,10 +117,12 @@ if st.session_state.current_language == "he":
         /* Make main content area RTL */
         div[data-testid="stAppViewContainer"] > section[data-testid="stVerticalBlock"] > div.block-container {
             direction: rtl;
+            text-align: right;
         }
         /* Make sidebar *content* RTL, but sidebar itself still opens from left */
         .stSidebar section[data-testid="stSidebarUserContent"] {
             direction: rtl;
+            text-align: right;
         }
         /* Ensure text inputs, text areas, and chat inputs are RTL for text entry */
         div[data-testid="stTextInput"] input, 
@@ -134,6 +136,12 @@ if st.session_state.current_language == "he":
             direction: rtl;
             text-align: right;
         }
+        /* Ensure standard text elements within the main content and sidebar also align right */
+        div[data-testid="stAppViewContainer"] div[data-testid="stMarkdownContainer"],
+        .stSidebar div[data-testid="stMarkdownContainer"] {
+            text-align: right; /* Markdown content */
+        }
+        /* You might need to add more specific selectors if some elements still misbehave */
         </style>
     """,
         unsafe_allow_html=True,
