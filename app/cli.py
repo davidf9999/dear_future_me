@@ -3,7 +3,8 @@
 app/cli.py
 ~~~~~~~~~~
 
-Small helper CLI for local demo & smoke-tests.
+Command-Line Interface for Dear-Future-Me application.
+Provides interactive chat and RAG administration utilities.
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ from rich.text import Text
 
 # Assuming app.clients.api_client and app.core.settings are findable
 # If running with `python -m app.cli`, Python handles the path.
-# If running `python app/cli.py` directly, ensure project root is in PYTHONPATH or use sys.path manipulation (removed for now for linter).
 from app.clients.api_client import AsyncAPI
 from app.core.settings import Settings, get_settings
+from app.rag.processor import DocumentProcessor  # For RAG admin commands
 
 # --------------------------------------------------------------------------- #
 # Environment & constants
@@ -72,6 +73,11 @@ UI_STRINGS = {
         "login_error_other": "[red]Login error for {email} (status {status_code}): {text}[/red]",
         "unexpected_auth_error": "[red]Unexpected error during auth setup for {email}: {error}[/red]",
         "authenticated_as_banner": "[bold green]Authenticated as {email}[/bold green]\n",
+        "rag_ingest_start": "[bold blue]Starting RAG ingestion for namespace '{namespace}' from directory '{source_dir}'...[/bold blue]",
+        "rag_ingest_success": "[bold green]Ingestion complete. Processed {count} documents for namespace '{namespace}'.[/bold green]",
+        "rag_ingest_error_file": "[red]  Error ingesting {filename}: {error}[/red]",
+        "rag_ingest_error_general": "[bold red]An error occurred during RAG ingestion: {error}[/bold red]",
+        "rag_ingested_file": "  Ingested: {filename} as {doc_id}",
     },
     "he": {
         "greeting_banner": "[bold]צ'אט אינטראקטיבי עם 'אני מהעתיד' (הקלד 'צא' ליציאה)[/bold]",
@@ -98,6 +104,11 @@ UI_STRINGS = {
         "login_error_other": "[red]שגיאת התחברות עבור {email} (סטטוס {status_code}): {text}[/red]",
         "unexpected_auth_error": "[red]שגיאה לא צפויה במהלך הגדרת האימות עבור {email}: {error}[/red]",
         "authenticated_as_banner": "[bold green]מאומת/ת כ-{email}[/bold green]\n",
+        "rag_ingest_start": "[bold blue]מתחיל הטמעת RAG עבור מרחב השם '{namespace}' מהספרייה '{source_dir}'...[/bold blue]",
+        "rag_ingest_success": "[bold green]ההטמעה הושלמה. עובדו {count} מסמכים עבור מרחב השם '{namespace}'.[/bold green]",
+        "rag_ingest_error_file": "[red]  שגיאה בהטמעת {filename}: {error}[/red]",
+        "rag_ingest_error_general": "[bold red]אירעה שגיאה במהלך הטמעת RAG: {error}[/bold red]",
+        "rag_ingested_file": "  הוטמע: {filename} כ-{doc_id}",
     },
 }
 STR = UI_STRINGS.get(CURRENT_LANG, UI_STRINGS["en"])  # Fallback to English if lang not found
@@ -178,6 +189,76 @@ def cli() -> None:
     pass
 
 
+# --- RAG Administration Command Group ---
+@cli.group(help="Manage RAG knowledge base.")
+def rag():
+    """Commands for RAG administration."""
+    pass
+
+
+@rag.command(help="Ingest and index documents from a specified source into a RAG namespace.")
+@click.option(
+    "--namespace",
+    required=True,
+    type=click.Choice(
+        [
+            cfg.CHROMA_NAMESPACE_THEORY,
+            cfg.CHROMA_NAMESPACE_PLAN,
+            cfg.CHROMA_NAMESPACE_SESSION,
+            cfg.CHROMA_NAMESPACE_FUTURE,
+        ],
+        case_sensitive=False,
+    ),
+    help="The RAG namespace to ingest into.",
+)
+@click.option(
+    "--source-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True),
+    help="Directory containing documents to ingest.",
+)
+@click.option("--doc-id-prefix", default="doc", show_default=True, help="Prefix for document IDs.")
+@click.option(
+    "--file-extensions",
+    default=".txt,.md",
+    show_default=True,
+    help="Comma-separated list of file extensions to process (e.g., .txt,.md).",
+)
+def ingest(namespace: str, source_dir: str, doc_id_prefix: str, file_extensions: str):
+    """
+    Processes text files from source_dir and ingests them into the specified RAG namespace.
+    This is a synchronous operation for simplicity in a CLI admin command.
+    """
+    console.print(STR["rag_ingest_start"].format(namespace=namespace, source_dir=source_dir))
+    valid_extensions = [ext.strip() for ext in file_extensions.split(",")]
+    try:
+        # Note: DocumentProcessor uses OpenAIEmbeddings by default, which costs money.
+        # Consider allowing configuration for local/free embedding models for admin tasks.
+        processor = DocumentProcessor(namespace=namespace)  # Uses settings from cfg
+
+        count = 0
+        for filename in os.listdir(source_dir):
+            if any(filename.endswith(ext) for ext in valid_extensions):
+                file_path = os.path.join(source_dir, filename)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        text_content = f.read()
+                    # Create a more unique doc_id, perhaps incorporating part of the filename
+                    base_filename = os.path.splitext(filename)[0].replace(" ", "_").lower()
+                    doc_id = f"{doc_id_prefix}_{base_filename}_{count + 1}"
+                    processor.ingest(doc_id=doc_id, text=text_content, metadata={"source_file": filename})
+                    console.print(STR["rag_ingested_file"].format(filename=filename, doc_id=doc_id))
+                    count += 1
+                except Exception as e:
+                    console.print(STR["rag_ingest_error_file"].format(filename=filename, error=e))
+        console.print(STR["rag_ingest_success"].format(count=count, namespace=namespace))
+    except Exception as e:
+        console.print(STR["rag_ingest_error_general"].format(error=e))
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
+
+
 @cli.command(help="Interactive chat with the running API server.")
 @click.option(
     "--url",
@@ -185,11 +266,11 @@ def cli() -> None:
     show_default=True,
     help="Base URL of the FastAPI server.",
 )
-def chat(url: str) -> None:
+async def chat(url: str) -> None:  # Make the command itself async
     """Start an interactive chat session."""
     api = AsyncAPI(url)  # Instantiate the new AsyncAPI client
 
-    async def _run() -> None:
+    async def _run_chat_logic() -> None:  # Renamed internal function for clarity
         # ------------------------------------------------------------------ auth
         try:
             token = await setup_cli_session_auth(api)  # Pass the api instance
@@ -212,69 +293,81 @@ def chat(url: str) -> None:
         console.print(STR["type_exit_prompt"])
 
         # ------------------------------------------------------------------ loop
-        while True:
-            try:
-                query = console.input(STR["user_prompt"]).strip()
-            except (KeyboardInterrupt, EOFError):
-                console.print(STR["bye_message"])
-                break
-
-            if query.lower() in {"exit", "quit", "צא"}:  # Added Hebrew exit command
-                console.print(STR["bye_message"])
-                break
-
-            if not query:  # Skip empty input
-                continue
-
-            try:
-                answer = await api.chat(query)  # Use the AsyncAPI's chat method
-            except httpx.HTTPStatusError as ex_http:
-                console.print(
-                    STR["http_error_from_server"].format(
-                        status_code=ex_http.response.status_code, text=ex_http.response.text
-                    )
-                )
-                if ex_http.response.status_code == 401:  # Unauthorized
-                    console.print(STR["session_expired_error"])
-            except Exception as ex:
-                console.print(STR["generic_comms_error"])
-                console.print(STR["details_to_stderr"])
-                print("----- TRACEBACK -----", file=sys.stderr)
-                import traceback
-
-                traceback.print_exception(ex, file=sys.stderr)
-                break  # Break on unexpected errors
-
-            console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)
-
-        await api.close()  # Use the AsyncAPI's close method
-
-    try:
-        asyncio.run(_run())
-    except RuntimeError as e:
-        if "Event loop is closed" not in str(e):  # Avoid error if loop already closed
-            raise
-    finally:
-        # Ensure connection pool closed properly, even if _run had an issue
-        # This might run into "Event loop is closed" if _run already closed it or failed early
         try:
-            # Check if api instance was successfully created and has a client to close
-            if "api" in locals() and hasattr(api, "_client") and api._client and not api._client.is_closed:
-                asyncio.run(api.close())
-        except RuntimeError as e:
-            if "Event loop is closed" not in str(e) and "cannot schedule new futures after shutdown" not in str(e):
-                print(f"Note: Error during final API client close: {e}", file=sys.stderr)
-            pass
+            while True:
+                try:
+                    query = await asyncio.to_thread(console.input, STR["user_prompt"])
+                    query = query.strip()
+                except (KeyboardInterrupt, EOFError):
+                    console.print(STR["bye_message"])
+                    break
+
+                if query.lower() in {"exit", "quit", "צא"}:  # Added Hebrew exit command
+                    console.print(STR["bye_message"])
+                    break
+
+                if not query:  # Skip empty input
+                    continue
+
+                try:
+                    answer = await api.chat(query)  # Use the AsyncAPI's chat method
+                except httpx.HTTPStatusError as ex_http:
+                    console.print(
+                        STR["http_error_from_server"].format(
+                            status_code=ex_http.response.status_code, text=ex_http.response.text
+                        )
+                    )
+                    if ex_http.response.status_code == 401:  # Unauthorized
+                        console.print(STR["session_expired_error"])
+                except Exception as ex:  # Catch other exceptions during chat call
+                    console.print(STR["generic_comms_error"])
+                    console.print(STR["details_to_stderr"])
+                    print("----- TRACEBACK -----", file=sys.stderr)
+                    import traceback
+
+                    traceback.print_exception(ex, file=sys.stderr)
+                    break  # Break on unexpected errors
+
+                console.print(Text(STR["ai_prompt"], style="bold cyan"), answer)
+        finally:
+            await api.close()  # Ensure API client is closed
+
+    await _run_chat_logic()
+
+
+@cli.result_callback()
+def process_result(result, **kwargs):
+    """
+    Handles the result of a Click command.
+    If an async command was run, Click's default runner awaits it.
+    This callback is mostly for potential future use or cleanup if needed.
+    """
+    # If result is a coroutine, it should have been awaited by Click's runner
+    # for async commands.
+    pass
 
 
 # --------------------------------------------------------------------------- #
 # Entry-point
 # --------------------------------------------------------------------------- #
 
+
+def main():
+    """
+    Main entry point for the CLI.
+    Handles Click's async command execution.
+    """
+    # Click's default behavior for `cli.main()` when `cli` contains async commands
+    # is to handle the asyncio event loop.
+    # We pass `standalone_mode=False` if we were to call this programmatically
+    # and manage the loop ourselves, but for direct script execution,
+    # `cli()` or `cli.main()` is usually sufficient.
+    # Let Click manage its own loop for async commands.
+    cli()
+
+
 if __name__ == "__main__":
     # To run this CLI directly:
-    # 1. Ensure your project root is in PYTHONPATH or run as a module:
-    #    `python -m app.cli chat`
-    # 2. If running `python app/cli.py` directly, you might need to add
-    #    the project root to sys.path at the top of this file (currently removed for linters).
-    cli()
+    # `python -m app.cli chat`
+    # `python -m app.cli rag ingest --namespace theory --source-dir ./data/theory_docs`
+    main()
