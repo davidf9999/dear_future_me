@@ -8,6 +8,12 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # - repo: https://github.com/psf/black
+  #   rev: 24.4.2  # Match the version in requirements-dev.txt
+  #   hooks:
+  #     - id: black
+  #       language_version: python3.11
+
   # ── Isort (import ordering; run *after* Black to keep hashes stable) ───
   - repo: https://github.com/pre-commit/mirrors-isort
     rev: v5.10.1
