@@ -84,6 +84,7 @@ docker-compose.override.yml
 __pycache__/
 *.pem                    # private keys
 
-# chroma RAG
+# sqlite DB, chroma RAG
 chroma_data/
 demo_data/
+data/
