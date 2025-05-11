@@ -252,19 +252,19 @@ def test_orchestrator_prompt_loading_by_language(
     # 8. Assertions
     # Check that from_template was called with the expected content
     # It will be called twice (once for crisis, once for system)
-    assert (
-        len(actual_prompt_contents_passed) >= 2
-    ), f"ChatPromptTemplate.from_template not called enough times. Called {len(actual_prompt_contents_passed)} times. Content: {actual_prompt_contents_passed}"
+    assert len(actual_prompt_contents_passed) >= 2, (
+        f"ChatPromptTemplate.from_template not called enough times. Called {len(actual_prompt_contents_passed)} times. Content: {actual_prompt_contents_passed}"
+    )
 
     # Check if the expected crisis content was passed to from_template
-    assert any(
-        expected_crisis_content in content for content in actual_prompt_contents_passed
-    ), f"Expected crisis content '{expected_crisis_content}' not found in {actual_prompt_contents_passed}"
+    assert any(expected_crisis_content in content for content in actual_prompt_contents_passed), (
+        f"Expected crisis content '{expected_crisis_content}' not found in {actual_prompt_contents_passed}"
+    )
 
     # Check if the expected system content was passed to from_template
-    assert any(
-        expected_system_content in content for content in actual_prompt_contents_passed
-    ), f"Expected system content '{expected_system_content}' not found in {actual_prompt_contents_passed}"
+    assert any(expected_system_content in content for content in actual_prompt_contents_passed), (
+        f"Expected system content '{expected_system_content}' not found in {actual_prompt_contents_passed}"
+    )
 
     if expect_warning:
         assert mock_log_warning.called, "Expected logging.warning to be called for fallback"

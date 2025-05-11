@@ -186,9 +186,9 @@ async def test_cli_chat_direct_async_invoke(MockConsolePrint, MockConsoleInput, 
 
         traceback.print_exception(*result.exc_info)
 
-    assert (
-        result.exit_code == 0
-    ), f"CLI exited with code {result.exit_code}, output: '{result.output}', exception: {result.exception}"
+    assert result.exit_code == 0, (
+        f"CLI exited with code {result.exit_code}, output: '{result.output}', exception: {result.exception}"
+    )
     # If the above passes, then the issue is with the content of the output.
     # If it still fails with empty output, the async command execution is the core problem.
 
