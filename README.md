@@ -130,9 +130,38 @@ This is the recommended way to run the entire Dear Future Me application stack, 
 
 ---
 
-### Alternative: Running Locally (without Docker for ChromaDB)
+## 🏃 Running Locally with `run.sh` and `stop.sh` (Dev/Prod Environments)
 
-This is suitable if you want to run ChromaDB separately or use an in-memory version for quick tests (requires code changes in `DocumentProcessor` for non-persistent Chroma). The default setup persists Chroma data to `./chroma_data`.
+For local development and testing without Docker, a `run.sh` script is provided to manage separate 'development' (`dev`) and 'production-like' (`prod`) environments. This allows you to use different configurations (e.g., ports, database files, ChromaDB directories) for each.  
+`run.sh status` indicates the status of the servers.  
+`stop.sh <dev/prod>` stops the selected server. 
+
+### Prerequisites
+
+*   Python 3.10+ and `pip`.
+*   A virtual environment.
+*   Git (for advisory branch checks).
+
+### Environment Configuration (`.env.dev` & `.env.prod`)
+
+The `run.sh` script relies on environment-specific `.env` files:
+*   `.env.dev`: For development settings.
+*   `.env.prod`: For production-like local settings.
+
+1.  **Copy `.env.example`** to create these files:
+    ```bash
+    cp .env.example .env.dev
+    cp .env.example .env.prod
+    ```
+2.  **Edit `.env.dev` and `.env.prod`** to set appropriate values. Key differences usually include:
+    *   `DATABASE_URL`: (e.g., `sqlite+aiosqlite:///./dev.db` vs `sqlite+aiosqlite:///./prod.db`)
+    *   `DFM_API_PORT`: (e.g., `8008` for dev, `8000` for prod)
+    *   `STREAMLIT_SERVER_PORT`: (e.g., `8502` for dev, `8501` for prod)
+    *   `CHROMA_DIR`: (e.g., `./chroma_data_dev` vs `./chroma_data_prod`)
+    *   `DEMO_MODE`: (e.g., `true` for dev, `false` for prod)
+    *   `SECRET_KEY`: Use distinct, strong keys.
+
+### Setting up the Local Environment
 
 1.  Create and activate a virtual environment:
     ```bash
@@ -346,4 +375,3 @@ pytest -q
 ## 📜 License
 
 MIT © Dear Future Me Team (or your chosen license and holder)
-

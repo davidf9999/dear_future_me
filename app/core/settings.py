@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(validation_alias="SECRET_KEY")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
+    # ── Service Ports & Host ───────────────────────────────────
+    # These will be overridden by .env.dev or .env.prod via run.sh
+    DFM_API_HOST: str = Field("0.0.0.0", validation_alias="DFM_API_HOST")
+    DFM_API_PORT: int = Field(8000, validation_alias="DFM_API_PORT")  # Default for prod
+    STREAMLIT_SERVER_PORT: int = Field(8501, validation_alias="STREAMLIT_SERVER_PORT")  # Default for prod
+
     # ── Flags ─────────────────────────────────────────────────
     DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")  # Server's DEMO_MODE, e.g., for DB reset
     DEBUG_SQL: bool = Field(False, validation_alias="DEBUG_SQL")
