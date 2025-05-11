@@ -1,4 +1,5 @@
 # tests/test_streamlit_gui.py
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,12 +18,18 @@ STREAMLIT_APP_FILE = "streamlit_app.py"
 
 
 # Helper to create a mock Settings object for Streamlit tests
-def create_streamlit_mock_settings(lang: str = "en", **kwargs):
+def create_streamlit_mock_settings(lang: Literal["en", "he"] = "en", **kwargs):
     from app.core.settings import (
         Settings,  # Local import to avoid issues if settings not fully loaded
     )
 
-    return Settings(APP_DEFAULT_LANGUAGE=lang, **kwargs)  # Provide other necessary defaults if any
+    # Ensure all required fields for Settings have some default if not in kwargs
+    # This avoids validation errors if your Settings model has many required fields.
+    # For this specific error, the key is typing `lang` correctly.
+    # You might need to add more default values here if Settings instantiation fails
+    # due to other missing required fields not covered by **kwargs in a test.
+    # Provide other necessary defaults if any, or ensure kwargs covers them.
+    return Settings(APP_DEFAULT_LANGUAGE=lang, **kwargs)
 
 
 def test_initial_app_render_and_login_attempt_failure():
@@ -37,7 +44,7 @@ def test_initial_app_render_and_login_attempt_failure():
 
     # Mock get_settings to control the language for the Streamlit app run
     # For this test, let's assume we want to test with English UI strings
-    mock_settings_en = create_streamlit_mock_settings(lang="en")
+    mock_settings_en = create_streamlit_mock_settings(lang="en")  # lang is already Literal here
 
     # The path to patch is where SyncAPI is *imported* in streamlit_app.py
     # This assumes: from app.clients.api_client import SyncAPI
@@ -89,7 +96,7 @@ def test_successful_login_updates_ui_and_state():
 
     # Mock get_settings to control the language for the Streamlit app run
     # Let's test with English UI strings for this assertion
-    mock_settings_en = create_streamlit_mock_settings(lang="en")
+    mock_settings_en = create_streamlit_mock_settings(lang="en")  # lang is already Literal here
 
     with (
         patch("app.clients.api_client.SyncAPI", return_value=mock_sync_api_instance),

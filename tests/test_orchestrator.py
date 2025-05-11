@@ -1,6 +1,7 @@
 # tests/test_orchestrator.py
 
 import logging  # For capturing log messages
+from typing import Literal  # Import Literal
 from unittest.mock import AsyncMock, MagicMock, mock_open
 
 import pytest
@@ -100,18 +101,19 @@ def test_detect_risk_functionality():
 
 
 # Helper to create a mock Settings object
-def create_mock_settings(lang: str, **kwargs) -> Settings:
+def create_mock_settings(lang: Literal["en", "he"], **kwargs) -> Settings:
     # Provide default values for all required fields in Settings
     # to avoid validation errors when instantiating.
     # Adjust these defaults if your Settings model changes.
+    # Ensure values in this dictionary have the correct Python types.
     defaults = {
         "DATABASE_URL": "sqlite+aiosqlite:///./test_lang.db",
         "SECRET_KEY": "testsecret",
-        "ACCESS_TOKEN_EXPIRE_MINUTES": 60,
-        "DEMO_MODE": True,
-        "DEBUG_SQL": False,
-        "MAX_MESSAGE_LENGTH": 1000,
-        "ASR_TIMEOUT_SECONDS": 15.0,
+        "ACCESS_TOKEN_EXPIRE_MINUTES": 60,  # Already an int
+        "DEMO_MODE": True,  # Already a bool
+        "DEBUG_SQL": False,  # Already a bool
+        "MAX_MESSAGE_LENGTH": 1000,  # Already an int
+        "ASR_TIMEOUT_SECONDS": 15.0,  # Already a float
         "CHROMA_DIR": "./chroma_test_lang",
         "CHROMA_NAMESPACE_THEORY": "theory",
         "CHROMA_NAMESPACE_PLAN": "personal_plan",
@@ -119,13 +121,40 @@ def create_mock_settings(lang: str, **kwargs) -> Settings:
         "CHROMA_NAMESPACE_FUTURE": "future_me",
         "OPENAI_API_KEY": "test_api_key",
         "LLM_MODEL": "gpt-4o",
-        "LLM_TEMPERATURE": 0.7,
+        "LLM_TEMPERATURE": 0.7,  # Already a float
         "DEMO_USER_EMAIL": "demo@example.com",
         "DEMO_USER_PASSWORD": "password",
-        "APP_DEFAULT_LANGUAGE": lang,
+        "APP_DEFAULT_LANGUAGE": lang,  # Type is Literal["en", "he"]
     }
     defaults.update(kwargs)
-    return Settings(**defaults)
+
+    # Prepare a dictionary with explicitly typed values for Mypy's satisfaction
+    # Pydantic will still perform its own validation at runtime.
+    typed_settings_args = {
+        "DATABASE_URL": defaults["DATABASE_URL"],  # Should be str
+        "SECRET_KEY": defaults["SECRET_KEY"],  # Should be str
+        "ACCESS_TOKEN_EXPIRE_MINUTES": defaults["ACCESS_TOKEN_EXPIRE_MINUTES"],  # Should be int
+        "MAX_MESSAGE_LENGTH": defaults["MAX_MESSAGE_LENGTH"],  # Should be int
+        "DEMO_MODE": defaults["DEMO_MODE"],  # Should be bool
+        "DEBUG_SQL": defaults["DEBUG_SQL"],  # Should be bool
+        "CHROMA_DIR": defaults["CHROMA_DIR"],  # Should be str
+        "CHROMA_NAMESPACE_THEORY": defaults["CHROMA_NAMESPACE_THEORY"],  # Should be str
+        "CHROMA_NAMESPACE_PLAN": defaults["CHROMA_NAMESPACE_PLAN"],  # Should be str
+        "CHROMA_NAMESPACE_SESSION": defaults["CHROMA_NAMESPACE_SESSION"],  # Should be str
+        "CHROMA_NAMESPACE_FUTURE": defaults["CHROMA_NAMESPACE_FUTURE"],  # Should be str
+        "OPENAI_API_KEY": defaults["OPENAI_API_KEY"],  # Should be str
+        "LLM_MODEL": defaults["LLM_MODEL"],  # Should be str
+        "LLM_TEMPERATURE": defaults["LLM_TEMPERATURE"],  # Should be float
+        "ASR_TIMEOUT_SECONDS": defaults["ASR_TIMEOUT_SECONDS"],  # Should be float
+        "DEMO_USER_EMAIL": defaults["DEMO_USER_EMAIL"],  # Should be str
+        "DEMO_USER_PASSWORD": defaults["DEMO_USER_PASSWORD"],  # Should be str
+        "APP_DEFAULT_LANGUAGE": defaults["APP_DEFAULT_LANGUAGE"],
+    }
+
+    # Allow kwargs to override these explicitly typed defaults
+    typed_settings_args.update(kwargs)
+
+    return Settings(**typed_settings_args)
 
 
 @pytest.mark.parametrize(

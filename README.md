@@ -288,6 +288,22 @@ The behavior of the server and client tools can be influenced by variables in yo
   * The language of the LLM prompt templates (`system_prompt.*.md`, `crisis_prompt.*.md`) loaded by the server. This heavily influences the language of the LLM's responses.
   * For the demo, setting `APP_DEFAULT_LANGUAGE=he` is recommended.
 
+### Ingesting Demo RAG Content (After Starting Servers)
+
+Once the servers for a specific environment are running (e.g., after `./run.sh dev`), you can populate the RAG store with demo content using the `demo_ingestion.sh` script. This script targets the API endpoint defined in the corresponding `.env.&lt;env&gt;` file.
+
+* **For the development environment:**
+
+    ```bash
+    ./demo_ingestion.sh dev
+    ```
+
+* **For the production-like local environment:**
+
+    ```bash
+    ./demo_ingestion.sh prod
+    ```
+
 **Important Security Note:**
 The `/chat/text` API endpoint (and other sensitive endpoints) **always require authentication**, regardless of the server's `DEMO_MODE` setting. This ensures that the API is not publicly exposed without valid credentials.
 
@@ -306,7 +322,10 @@ All vector data is persisted under the directory defined by `CHROMA_DIR` in `app
 Sample text files are provided in the `demo_data/` folder. Use the `demo_ingestion.sh` script to ingest them (ensure `CHROMA_DIR` in the script matches your setup if not using Docker Compose defaults):
 
 ```bash
-./demo_ingestion.sh
+# For development environment
+./demo_ingestion.sh dev
+# For production-like local environment
+./demo_ingestion.sh prod
 ```
 This script first clears old demo collections from the specified `CHROMA_DIR` and then uses `curl` to call the `/rag/ingest/` endpoint for each demo file.
 
