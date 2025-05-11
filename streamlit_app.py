@@ -62,7 +62,7 @@ UI_STRINGS_STREAMLIT = {
     },
     "he": {
         "page_title": "אני מהעתיד - צ'אט",
-        "header": "שוחח/י עם האני העתידי שלך",
+        "header": "שיחה עם האני העתידי שלך",
         "email_label": "אימייל",
         "password_label": "סיסמה",
         "login_button": "התחבר",

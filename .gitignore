@@ -86,3 +86,4 @@ __pycache__/
 
 # chroma RAG
 chroma_data/
+demo_data/
