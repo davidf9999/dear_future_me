@@ -2,14 +2,15 @@
 
 import uuid
 
-from fastapi.testclient import TestClient
+import pytest
+from fastapi.testclient import (
+    TestClient,  # Keep this for type hinting if client is passed
+)
 
-from app.main import app
 
-client = TestClient(app)
-
-
-def test_register_and_login():
+@pytest.mark.demo_mode(False)  # This test needs registration enabled
+def test_register_and_login(client: TestClient):
+    # client is now provided by the fixture in conftest.py
     # Generate a unique email
     unique_email = f"test_{uuid.uuid4()}@example.com"
 

@@ -7,18 +7,18 @@ from fastapi.testclient import TestClient
 from langchain.schema import Document
 
 from app.api.orchestrator import Orchestrator, RagOrchestrator, get_rag_orchestrator
-from app.main import (
-    app,  # Assuming current_active_user is also imported if needed elsewhere or handled by other mocks
-)
 
 # If current_active_user is solely for test_chat_rag_endpoint, keep its import local or ensure it's mockable
 from app.rag.processor import DocumentProcessor
 
+# from app.main import app # app is used by the client fixture
+
 
 # ─── Fixture: TestClient ─────────────────────────────────────────────
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client_rag_pipeline(client: TestClient):  # Renamed to avoid conflict if there's a global client
+    """Uses the global client fixture from conftest.py"""
+    return client
 
 
 # ─── Fixtures to override CHROMA_DIR ─────────────────────────────────
@@ -123,7 +123,8 @@ def test_singleton_rag_orchestrator_instance():  # Removed client fixture as it'
 # ─── Test /chat/text uses Orchestrator.answer ─────────────────────────
 
 
-def test_chat_rag_endpoint(monkeypatch, client):  # client fixture is used here
+@pytest.mark.demo_mode(False)  # This test needs registration enabled
+def test_chat_rag_endpoint(client_rag_pipeline: TestClient, monkeypatch):  # Use the renamed fixture
     # Stub Orchestrator.answer with an async function
     async def fake_answer(self, q):
         return "Echo: " + q
@@ -136,12 +137,12 @@ def test_chat_rag_endpoint(monkeypatch, client):  # client fixture is used here
     test_password = "testpassword"
     register_payload = {"email": test_user_email, "password": test_password}
 
-    reg_response = client.post("/auth/register", json=register_payload)
+    reg_response = client_rag_pipeline.post("/auth/register", json=register_payload)
     assert reg_response.status_code == 201, f"Failed to register test user: {reg_response.text}"
 
     # 2. Log in to get a token
     login_payload = {"username": test_user_email, "password": test_password}
-    login_response = client.post("/auth/login", data=login_payload)
+    login_response = client_rag_pipeline.post("/auth/login", data=login_payload)
     assert login_response.status_code == 200, f"Failed to log in test user: {login_response.text}"
 
     token_data = login_response.json()
@@ -150,7 +151,7 @@ def test_chat_rag_endpoint(monkeypatch, client):  # client fixture is used here
     headers = {"Authorization": f"Bearer {token}"}
 
     # 3. Call the chat endpoint with the token
-    res = client.post("/chat/text", headers=headers, json={"message": "hi there"})
+    res = client_rag_pipeline.post("/chat/text", headers=headers, json={"message": "hi there"})
     assert res.status_code == 200
     assert res.json()["reply"] == "Echo: hi there"
 
@@ -164,9 +165,9 @@ def stub_summarize(monkeypatch):
     monkeypatch.setattr(RagOrchestrator, "summarize_session", fake_summarize)
 
 
-def test_finalize_session_endpoint(client):  # client fixture is used here
+def test_finalize_session_endpoint(client_rag_pipeline: TestClient):  # Use the renamed fixture
     session_id = "sess123"
-    res = client.post(f"/rag/session/{session_id}/summarize")
+    res = client_rag_pipeline.post(f"/rag/session/{session_id}/summarize")
     assert res.status_code == 200
     payload = res.json()
     assert payload["session_id"] == session_id

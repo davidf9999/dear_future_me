@@ -5,13 +5,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.orchestrator import Orchestrator
-from app.main import app
 
-client = TestClient(app)
+# from app.main import app # app is used by the client fixture
 
 
 @pytest.mark.asyncio
-async def test_chat_endpoint_authenticated(monkeypatch):
+@pytest.mark.demo_mode(False)  # This test needs registration enabled
+async def test_chat_endpoint_authenticated(client: TestClient, monkeypatch):
     """
     Tests the /chat/text endpoint with an authenticated user.
     The endpoint now always requires authentication.
@@ -29,7 +29,7 @@ async def test_chat_endpoint_authenticated(monkeypatch):
 
     # Ensure the app is fully initialized for the test client context
     # This is usually handled by TestClient(app) but let's be explicit if issues persist
-    with TestClient(app) as current_client:
+    with client as current_client:  # Use the client fixture
         reg_response = current_client.post("/auth/register", json=register_payload)
         assert reg_response.status_code == 201, f"Failed to register test user: {reg_response.text}"
 

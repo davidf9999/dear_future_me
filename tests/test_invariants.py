@@ -10,12 +10,13 @@ from app.auth.router import get_jwt_strategy
 from app.core.settings import get_settings
 from app.db.session import AsyncSessionMaker  # engine was locally imported
 from app.db.session import engine, get_async_session
-from app.main import app
+
+# from app.main import app
 
 
 # ─────────────────────────  routing invariants  ─────────────────────────
-def test_auth_routes_present():
-    client = TestClient(app)
+@pytest.mark.demo_mode(False)  # This test needs registration route present
+def test_auth_routes_present(client: TestClient):
     assert client.post("/auth/login").status_code != 404
     assert client.post("/auth/register").status_code != 404
 

@@ -1,12 +1,7 @@
 # tests/conftest.py
 # ruff: noqa: E402
-# tests/conftest.py
 """
 Global test fixtures.
-
-* Creates the SQLite schema exactly once per test session.
-* Forces DEMO_MODE=true so chat endpoints stay public on CI.
-* Provides a function-scope fixture to clear the users table between tests.
 """
 
 import asyncio
@@ -14,39 +9,61 @@ import os
 from typing import AsyncGenerator
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-# --------------------------------------------------------------------------- #
-# 1)  Make sure the app reads a predictable environment
-# --------------------------------------------------------------------------- #
-os.environ.setdefault("DEMO_MODE", "true")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
-# If you use DEBUG_SQL etc. add them here as well.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")  # Keep this for Alembic in CI if needed
 
 from app.auth.models import UserTable
-
-# 2)  Import *after* env-vars so Settings picks them up
+from app.core.settings import get_settings  # Import get_settings for cache clearing
 from app.db.init_db import init_db
 from app.db.session import get_async_session
 
+# Import the factory function instead of the global app instance
+from app.main import create_app
 
-# --------------------------------------------------------------------------- #
-# 3)  Bootstrap the schema once for the whole test run
-# --------------------------------------------------------------------------- #
+
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap_db() -> None:
     """Create all tables once at session start (synchronous wrapper)."""
-    asyncio.run(init_db())  # init_db already drops & creates all tables
+    # If init_db relies on settings, ensure they are loaded correctly for this session scope
+    # For now, assuming init_db uses its own Settings() instance or a global one that's okay for setup.
+    asyncio.run(init_db())
 
 
-# --------------------------------------------------------------------------- #
-# 4)  Function-scope fixture to clear users table (keeps tests isolated)
-# --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
 async def clear_users_table() -> AsyncGenerator[None, None]:
     """Empty the users table between tests that might insert rows."""
-    async for session in get_async_session():  # async generator dependency
+    async for session in get_async_session():
         await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
         await session.commit()
         break
     yield
+
+
+@pytest.fixture
+def client(request, monkeypatch) -> TestClient:
+    """
+    Provides a TestClient instance by calling the app factory.
+    Tests can mark themselves with @pytest.mark.demo_mode(False)
+    to run with DEMO_MODE=false. Defaults to DEMO_MODE=true for tests not marked.
+    """
+    marker = request.node.get_closest_marker("demo_mode")
+    run_in_demo_mode = True  # Default for tests
+    if marker and marker.args[0] is False:
+        run_in_demo_mode = False
+
+    if run_in_demo_mode:
+        monkeypatch.setenv("DEMO_MODE", "true")
+        print("INFO (test fixture): DEMO_MODE set to true for this test.")
+    else:
+        monkeypatch.setenv("DEMO_MODE", "false")
+        print("INFO (test fixture): DEMO_MODE set to false for this test.")
+
+    # Crucially, clear settings cache so it reloads with the new DEMO_MODE
+    # when create_app() calls get_settings()
+    get_settings.cache_clear()
+
+    # Create a fresh app instance for this test
+    test_app = create_app()
+    return TestClient(test_app)
