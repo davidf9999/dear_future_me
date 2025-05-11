@@ -41,8 +41,7 @@ echo
 # 1. Purge previous demo collections
 # ——————————————————————————————————————————
 for ns in "${DEMO_NS[@]}"; do
-  rm -rf "${CHROMA_DIR}/${ns}"* 2>/dev/null || true
-  rm -rf "${CHROMA_DB_PATH}/${ns}"* 2>/dev/null || true # Use CHROMA_DB_PATH
+  rm -rf "${CHROMA_DB_PATH}/${ns:?}"* 2>/dev/null || true # Consistently use CHROMA_DB_PATH and ensure ns is set
 done
 echo "🧹  Cleared old demo collections."
 

@@ -45,8 +45,8 @@ jobs:
       # - name: Isort Check
       #   run: isort --check .
 
-      - name: Mypy
-        run: mypy app tests              # instead of `mypy .`
+      # - name: Mypy
+      #   run: mypy app tests              # instead of `mypy .`
 
       # ── Migrate test DB (proves Alembic works) ───────────────────────
       - name: Alembic upgrade

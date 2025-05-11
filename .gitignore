@@ -88,3 +88,5 @@ __pycache__/
 chroma_data/
 demo_data/
 data/
+
+.pids

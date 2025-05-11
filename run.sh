@@ -32,6 +32,8 @@ check_process_status() {
       ps -p "$pid" -o pid,ppid,stat,etime,args --no-headers
     else
       echo "PID file ($pid_file) exists, but process with PID $pid is NOT RUNNING (stale PID file)."
+      echo "  This might indicate an unclean shutdown. You may need to manually check for lingering child processes"
+      echo "  related to '$service_name' using 'ps aux | grep python' or 'lsof -i :<port>' if issues persist."
       # Optionally, you could offer to remove the stale PID file here.
     fi
   else
@@ -139,9 +141,9 @@ if [ -n "$DATABASE_URL" ] && [[ "$DATABASE_URL" == sqlite*:///./* ]]; then
     echo "Ensured database directory exists for: $DB_PATH_RELATIVE"
 fi
 
-if [ -n "$CHROMA_DIR" ]; then
-    mkdir -p "$CHROMA_DIR"
-    echo "Ensured ChromaDB directory exists: $CHROMA_DIR"
+if [ -n "$CHROMA_DB_PATH" ]; then # Use CHROMA_DB_PATH to match .env files
+    mkdir -p "$CHROMA_DB_PATH"
+    echo "Ensured ChromaDB directory exists: $CHROMA_DB_PATH"
 fi
 
 # --- Start FastAPI Server ---
