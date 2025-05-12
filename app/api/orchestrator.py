@@ -217,7 +217,15 @@ class RagOrchestrator(Orchestrator):
             sources=lambda x: [doc.metadata.get("source", "unknown") for doc in x["context"]],
         )
         # The main RAG chain that takes 'input' and retrieves 'context'
-        return {"context": retriever, "input": RunnablePassthrough()} | rag_chain_with_source
+        return {
+            # "context": retriever, "input": RunnablePassthrough()
+            # FIX: Extract the 'input' key from the incoming dictionary before passing to the retriever
+            # The incoming dictionary to this part of the chain is {"query": ..., "input": ...}
+            # We want to pass the value of "input" to the retriever.
+            "context": RunnableLambda(lambda x: x["input"])
+            | retriever,  # Pass only the 'input' string to the retriever
+            "input": RunnablePassthrough(),  # Pass the original 'input' string through
+        } | rag_chain_with_source
 
     async def summarize_session(self, session_id: str) -> str:
         """

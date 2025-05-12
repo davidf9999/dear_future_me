@@ -102,6 +102,36 @@ if "api_client" not in st.session_state:
         st.error(f"Failed to initialize API client: {e}")
         st.stop()
 
+# --- Handle SKIP_AUTH ---
+# if cfg.SKIP_AUTH and "auth_token" not in st.session_state: # Check if auth_token is not already set (e.g. by a previous login attempt)
+#     st.session_state.auth_token = "skipped_auth_placeholder_token" # Indicate auth is skipped
+#     st.session_state.user_email = "skipped_auth_user@example.com" # Placeholder email
+#     # Also update the token in the api_client instance if it exists
+#     if "api_client" in st.session_state:
+#         st.session_state.api_client.token = st.session_state.auth_token
+#         # Important: If SKIP_AUTH is true, we should ensure no "Authorization" header is sent
+#         # or that the backend correctly ignores it. The current SyncAPI.login() sets this header.
+#         # For SKIP_AUTH, we are not calling login(), so the header might not be set, which is good.
+#     st.session_state.messages = [] # Ensure messages are cleared if "logging in" this way
+# --- Handle SKIP_AUTH and initial session state for auth ---
+if cfg.SKIP_AUTH:
+    # If SKIP_AUTH is true, force the state to reflect skipped authentication
+    st.session_state.auth_token = "skipped_auth_placeholder_token"
+    st.session_state.user_email = "skipped_auth_user@example.com"
+    # Ensure the api_client instance reflects this skipped auth state for its internal checks
+    # This assumes api_client is already in session_state from the block above
+    st.session_state.api_client.token = st.session_state.auth_token
+    # Clear messages only once when entering SKIP_AUTH mode
+    if "messages_cleared_for_skip_auth" not in st.session_state:
+        st.session_state.messages = []
+        st.session_state.messages_cleared_for_skip_auth = True
+elif "auth_token" not in st.session_state:  # If not SKIP_AUTH and no token, initialize to None
+    st.session_state.auth_token = None
+    st.session_state.user_email = None
+    st.session_state.messages = []
+    if "messages_cleared_for_skip_auth" in st.session_state:  # Reset this flag if SKIP_AUTH is turned off
+        del st.session_state.messages_cleared_for_skip_auth
+
 api: SyncAPI = st.session_state.api_client
 STR = UI_STRINGS_STREAMLIT.get(st.session_state.current_language, UI_STRINGS_STREAMLIT["en"])
 
@@ -169,7 +199,10 @@ if st.session_state.current_language == "he":
 
 # --- Authentication Section in Sidebar ---
 with st.sidebar:
-    if not st.session_state.auth_token:
+    if cfg.SKIP_AUTH:
+        st.success(STR["logged_in_as"].format(email=st.session_state.user_email))
+        st.info("Authentication is currently bypassed (SKIP_AUTH=true).")
+    elif not st.session_state.auth_token:
         st.subheader(STR["not_logged_in_sidebar_header"])
         email_input = st.text_input(STR["email_label"], key="auth_email_streamlit")
         password_input = st.text_input(STR["password_label"], type="password", key="auth_password_streamlit")
@@ -217,7 +250,9 @@ with st.sidebar:
 
 
 # --- Chat Section (Main Area) ---
-if st.session_state.auth_token:
+# if st.session_state.auth_token:
+if cfg.SKIP_AUTH or st.session_state.auth_token:
+    # Show chat interface if auth is skipped OR if a real auth token exists
     # Display chat messages from history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -235,15 +270,21 @@ if st.session_state.auth_token:
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             try:
-                assistant_response = api.chat(prompt)  # SyncAPI.chat is synchronous
-                message_placeholder.markdown(assistant_response)
+                # Call the API and get the ChatResponse object
+                assistant_response_obj = api.chat(prompt)
+                # Extract the actual reply string from the object
+                assistant_reply_string = assistant_response_obj.reply
+                # Display only the string content using markdown
+                message_placeholder.markdown(assistant_reply_string)
+                # Store the string content in session state for history
+                st.session_state.messages.append({"role": "assistant", "content": assistant_reply_string})
             except Exception as e:
                 st.error(f"{STR['chat_error']}: {e}")
                 assistant_response = f"Sorry, I encountered an error: {e}"  # Provide error to user
                 message_placeholder.markdown(assistant_response)
-
-            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+                st.session_state.messages.append({"role": "assistant", "content": assistant_response})
 else:
+    # Show login message only if auth is NOT skipped AND no auth token exists
     st.info(STR["not_logged_in_main_message"])
 
 # --- To run this app: streamlit run streamlit_app.py ---

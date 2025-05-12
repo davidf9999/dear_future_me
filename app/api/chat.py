@@ -48,4 +48,7 @@ async def chat_text(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="LLM orchestrator timed out",
         )
-    return ChatResponse(reply=reply)
+    # The 'reply' variable from orchestrator.answer() is a dictionary like {"reply": "actual_message"}.
+    # We need to extract the string value for the ChatResponse model.
+    actual_reply_string = reply.get("reply", "Error: No reply content found.")
+    return ChatResponse(reply=actual_reply_string)

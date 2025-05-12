@@ -27,9 +27,13 @@ from app.db.session import engine, get_async_session
 async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None, None]:  # Add app_settings parameter
     if app_settings.DEMO_MODE:  # Use app_settings
         print("INFO: DEMO_MODE is active. Initializing database (dropping and recreating tables)...")
-        await init_db()
+        # await init_db()
 
-        if app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+        # if app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+        # Only attempt to create demo user if DEMO_MODE is true AND auth is NOT skipped
+        if not app_settings.SKIP_AUTH and app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+            # Initialize DB only if we are actually going to create a user
+            await init_db()
             print(f"INFO: DEMO_MODE - Attempting to set up demo user: {app_settings.DEMO_USER_EMAIL}")
             try:
                 async for session in get_async_session():
@@ -64,6 +68,15 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
                 import traceback
 
                 traceback.print_exc()  # For more detailed error logging
+        elif app_settings.SKIP_AUTH:
+            print("INFO: DEMO_MODE is active, but SKIP_AUTH is true. Skipping demo user creation and DB init.")
+        else:
+            # This case might occur if DEMO_USER_EMAIL or DEMO_USER_PASSWORD are not set
+            print(
+                "INFO: DEMO_MODE is active, but demo user credentials are not fully set. Skipping demo user creation and DB init."
+            )
+
+            # traceback.print_exc()  # For more detailed error logging
     else:
         print("INFO: DEMO_MODE is false. Applying Alembic migrations if any...")
         try:
