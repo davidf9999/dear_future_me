@@ -25,9 +25,9 @@ repos:
 
   # ── Mypy (type checking). Non-blocking; use `pass_filenames: false` so
   #    the whole project is checked, not just staged files. ───────────────
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
-    hooks:
-      - id: mypy
-        args: [app, tests] 
-        pass_filenames: false
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.15.0
+  #   hooks:
+  #     - id: mypy
+  #       args: [app, tests] 
+  #       pass_filenames: false

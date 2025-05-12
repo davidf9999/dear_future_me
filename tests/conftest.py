@@ -5,14 +5,12 @@ Global test fixtures.
 """
 
 import asyncio
-import os
 from typing import AsyncGenerator
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")  # Keep this for Alembic in CI if needed
 
 from app.auth.models import UserTable
 from app.core.settings import get_settings  # Import get_settings for cache clearing
@@ -21,6 +19,15 @@ from app.db.session import get_async_session
 
 # Import the factory function instead of the global app instance
 from app.main import create_app
+
+# Environment variables for tests are now primarily set in pytest.ini
+# os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+# os.environ.setdefault("SECRET_KEY", "test_secret_key_for_pytest")
+# os.environ.setdefault("OPENAI_API_KEY", "test_openai_api_key_for_pytest")
+# os.environ.setdefault("CHROMA_DB_PATH", "./data/test/chroma_db")
+# os.environ.setdefault("APP_DEFAULT_LANGUAGE", "en")
+# os.environ.setdefault("DEMO_USER_EMAIL", "pytest_demo@example.com") # Example if needed by settings
+# os.environ.setdefault("DEMO_USER_PASSWORD", "pytest_password")      # Example
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -31,8 +38,8 @@ def _bootstrap_db() -> None:
     asyncio.run(init_db())
 
 
-@pytest.fixture(autouse=True)
-async def clear_users_table() -> AsyncGenerator[None, None]:
+@pytest_asyncio.fixture(autouse=True)
+async def clear_users_table() -> AsyncGenerator[None, None]:  # scope="function" is default for pytest_asyncio.fixture
     """Empty the users table between tests that might insert rows."""
     async for session in get_async_session():
         await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))

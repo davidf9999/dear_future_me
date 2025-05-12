@@ -1,130 +1,144 @@
-# app/clients/api_client.py
-from __future__ import annotations
+import json
+from typing import Any, Iterator, cast
 
-from typing import Any, Dict, Optional
+import httpx
+from pydantic import BaseModel
 
-import httpx  # For both sync and async clients
-
-# You might want to move cfg loading here if both clients need it,
-# or pass it in during instantiation. For now, let's assume
-# settings are accessed where needed or passed.
-# from app.core.settings import get_settings
-# cfg = get_settings()
+from app.auth.schemas import UserRead  # Assuming UserRead is here for type hinting
 
 
-class AsyncAPI:
-    """Asynchronous wrapper around the HTTP endpoints."""
+class APIError(Exception):
+    """Custom exception for API client errors."""
 
-    def __init__(self, base_url: str, token: Optional[str] = None):
-        self.base_url = base_url.rstrip("/")
-        self._token: Optional[str] = token
-        self._client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
-    async def _post(
-        self,
-        path: str,
-        json: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> httpx.Response:
-        url = f"{self.base_url}{path}"
-        _headers = headers or {}
-        if self._token:
-            _headers["Authorization"] = f"Bearer {self._token}"
-        resp = await self._client.post(url, json=json, data=data, headers=_headers)
-        resp.raise_for_status()
-        return resp
 
-    async def login(self, email: str, password: str) -> str:  # Return type hint
-        form = {"username": email, "password": password}
-        r = await self._post("/auth/login", data=form)
-        try:
-            token_value = r.json()["access_token"]
-            if not isinstance(token_value, str):
-                raise ValueError("Access token received is not a string.")
-            self._token = token_value
-            return self._token
-        except KeyError:
-            raise ValueError("Access token not found in login response.")
-        except TypeError:  # If r.json() is not a dict or access_token is not subscriptable
-            raise ValueError("Invalid login response format.")
+class TokenData(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
-    async def register(
-        self, email: str, password: str, first_name: str = "API", last_name: str = "User"
-    ) -> None:  # Return type hint
-        payload = {"email": email, "password": password, "first_name": first_name, "last_name": last_name}
-        await self._post("/auth/register", json=payload)
-        # No token returned by register, user needs to login after
 
-    async def chat(self, message: str) -> str:
-        if not self._token:
-            # Consider a custom exception or specific handling
-            raise Exception("AsyncAPI: Not authenticated for chat")
-        r = await self._post("/chat/text", json={"message": message})
-        data = r.json()
-        answer = data.get("answer") or data.get("reply")
-        if answer is None:
-            raise RuntimeError(f"AsyncAPI: Unexpected response payload: {data}")
-        return answer
+class MessagePayload(BaseModel):
+    message: str
 
-    async def close(self) -> None:
-        await self._client.aclose()
+
+class ChatResponse(BaseModel):
+    reply: str
+    session_id: str | None = None  # Assuming session_id might be part of the response
 
 
 class SyncAPI:
-    """Synchronous wrapper around the HTTP endpoints."""
+    """Synchronous client for interacting with the DFM API."""
 
-    def __init__(self, base_url: str, token: Optional[str] = None):
-        self.base_url = base_url.rstrip("/")
-        self._token: Optional[str] = token
-        self._client = httpx.Client(timeout=30.0, follow_redirects=True)
+    def __init__(self, base_url: str = "http://localhost:8000"):
+        self.base_url = base_url
+        self.client = httpx.Client(base_url=base_url)
+        self.token: str | None = None
 
-    def _post(
-        self,
-        path: str,
-        json_data: Optional[Dict[str, Any]] = None,  # Renamed for clarity vs async version
-        data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> httpx.Response:
-        url = f"{self.base_url}{path}"
-        _headers = headers or {}
-        if self._token:
-            _headers["Authorization"] = f"Bearer {self._token}"
-        resp = self._client.post(url, json=json_data, data=data, headers=_headers)
-        resp.raise_for_status()
-        return resp
-
-    def login(self, email: str, password: str) -> str:  # Return type hint
-        form = {"username": email, "password": password}
-        r = self._post("/auth/login", data=form)
+    def _handle_response(self, response: httpx.Response) -> Any:
+        if not response.is_success:
+            try:
+                detail = response.json().get("detail", response.text)
+            except json.JSONDecodeError:
+                detail = response.text
+            raise APIError(
+                f"API request failed: {response.status_code} - {detail}",
+                status_code=response.status_code,
+            )
         try:
-            token_value = r.json()["access_token"]
-            if not isinstance(token_value, str):
-                raise ValueError("Access token received is not a string.")
-            self._token = token_value
-            return self._token
-        except KeyError:
-            raise ValueError("Access token not found in login response.")
-        except TypeError:  # If r.json() is not a dict or access_token is not subscriptable
-            raise ValueError("Invalid login response format.")
+            return response.json()
+        except json.JSONDecodeError:
+            return response.text  # Or handle non-JSON responses as needed
 
-    def register(
-        self, email: str, password: str, first_name: str = "API", last_name: str = "User"
-    ) -> None:  # Return type hint
-        payload = {"email": email, "password": password, "first_name": first_name, "last_name": last_name}
-        self._post("/auth/register", json_data=payload)
-        # No token returned by register, user needs to login after
+    def _get_access_token(self, email: str, password: str) -> str:
+        """Authenticates and stores the access token."""
+        response = self.client.post("/auth/login", data={"username": email, "password": password})
+        # No need to call _handle_response here if we want custom logic for token
+        if not response.is_success:
+            try:
+                detail = response.json().get("detail", response.text)
+            except json.JSONDecodeError:
+                detail = response.text
+            raise APIError(
+                f"Login failed: {response.status_code} - {detail}",
+                status_code=response.status_code,
+            )
+        try:
+            response_data = response.json()
+            if isinstance(response_data, dict) and "access_token" in response_data:
+                token_val = response_data["access_token"]
+                if isinstance(token_val, str):
+                    return token_val
+                else:
+                    raise APIError(f"Access token received is not a string: {type(token_val)}")
+            raise APIError(f"Access token not found in login response: {response_data}")
+        except json.JSONDecodeError:
+            raise APIError(f"Login response was not valid JSON: {response.text}")
 
-    def chat(self, message: str) -> str:
-        if not self._token:
-            # Consider a custom exception or specific handling
-            raise Exception("SyncAPI: Not authenticated for chat")
-        r = self._post("/chat/text", json_data={"message": message})
-        data = r.json()
-        answer = data.get("answer") or data.get("reply")
-        if answer is None:
-            raise RuntimeError(f"SyncAPI: Unexpected response payload: {data}")
-        return answer
+    def login(self, email: str, password: str) -> None:
+        self.token = self._get_access_token(email, password)
+        self.client.headers["Authorization"] = f"Bearer {self.token}"
 
-    def close(self) -> None:
-        self._client.close()
+    def register(self, email: str, password: str) -> UserRead:
+        payload = {"email": email, "password": password, "is_active": True, "is_superuser": False, "is_verified": False}
+        response = self.client.post("/auth/register", json=payload)
+        data = self._handle_response(response)
+        return UserRead(**data)  # Assuming UserRead can be created from the response dict
+
+    def chat(self, message: str) -> ChatResponse:
+        if not self.token:
+            raise APIError("Not authenticated. Please login first.")
+        response = self.client.post("/chat/text", json={"message": message})
+        data = self._handle_response(response)
+        return ChatResponse(**data)  # Assuming ChatResponse can be created from the response dict
+
+    def chat_stream(self, message: str) -> Iterator[str]:
+        """
+        Sends a message to the /chat/stream endpoint and yields response chunks.
+        Assumes the stream returns newline-separated JSON objects, each being a string chunk.
+        """
+        if not self.token:
+            raise APIError("Not authenticated. Please login first.")
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/x-ndjson"}
+        payload = {"message": message}
+
+        with self.client.stream("POST", "/chat/stream", json=payload, headers=headers) as response:
+            if not response.is_success:
+                # Attempt to read the error response body
+                error_content = "".join([chunk.decode() for chunk in response.iter_bytes()])
+                try:
+                    detail = json.loads(error_content).get("detail", error_content)
+                except json.JSONDecodeError:
+                    detail = error_content
+                raise APIError(
+                    f"API stream request failed: {response.status_code} - {detail}",
+                    status_code=response.status_code,
+                )
+            for line_bytes in response.iter_lines():
+                line = line_bytes  # httpx iter_lines already decodes by default
+                if line:
+                    # Assuming each line is a string chunk directly, not JSON for this example
+                    # If each line IS a JSON object like {"chunk": "text"}, adjust parsing:
+                    # try:
+                    #   data = json.loads(line)
+                    #   yield cast(str, data.get("chunk", ""))
+                    # except json.JSONDecodeError:
+                    #   print(f"Warning: Could not decode JSON line from stream: {line}")
+                    yield cast(str, line)
+
+    def logout(self) -> None:
+        if not self.token:
+            # Optionally, raise an error or just silently pass
+            # print("Not logged in, so no logout action taken.")
+            return
+        try:
+            self.client.post("/auth/logout")
+        except httpx.RequestError as e:
+            # Handle network errors during logout if necessary
+            print(f"Network error during logout: {e}")
+        finally:
+            self.token = None
+            if "Authorization" in self.client.headers:
+                del self.client.headers["Authorization"]

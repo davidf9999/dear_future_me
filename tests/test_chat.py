@@ -45,6 +45,13 @@ async def test_chat_endpoint_authenticated(client: TestClient, monkeypatch):
 
         # 3. Call the chat endpoint with the token
         resp = current_client.post("/chat/text", headers=headers, json={"message": "hello"})
+        if resp.status_code != 200:  # Add this block for debugging
+            print("DEBUG: /chat/text endpoint failed!")
+            print(f"Status Code: {resp.status_code}")
+            try:
+                print(f"Response JSON: {resp.json()}")
+            except Exception:
+                print(f"Response Text (not JSON): {resp.text}")
         assert resp.status_code == 200
 
         reply_data = resp.json()

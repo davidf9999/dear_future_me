@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.orchestrator import RagOrchestrator, get_rag_orchestrator
+from app.api.orchestrator import RagOrchestrator, get_orchestrator
 from app.main import app
 from app.rag.processor import DocumentProcessor
 
@@ -18,7 +18,7 @@ def stub_processor(monkeypatch):
 
     monkeypatch.setattr(RagOrchestrator, "summarize_session", fake_sum)
     # override dependency
-    app.dependency_overrides[get_rag_orchestrator] = lambda: RagOrchestrator()
+    app.dependency_overrides[get_orchestrator] = lambda: RagOrchestrator()
 
 
 @pytest.fixture

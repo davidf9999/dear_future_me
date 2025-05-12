@@ -1,7 +1,7 @@
 # tests/test_orchestrator.py
 
 import logging  # For capturing log messages
-from typing import Literal  # Import Literal
+from typing import Any, Dict, List, Literal  # Import Literal, Dict, Any, List
 from unittest.mock import AsyncMock, MagicMock, mock_open
 
 import pytest
@@ -19,13 +19,15 @@ async def test_non_risk_uses_rag_chain(monkeypatch):
     monkeypatch.setattr(orch, "_detect_risk", lambda q: False)
 
     mock_rag_chain = AsyncMock()
+    # Ensure the mock returns the expected dictionary structure
     mock_rag_chain.ainvoke = AsyncMock(return_value={"answer": "RAG→OK"})
 
     monkeypatch.setattr(orch, "_rag_chain", mock_rag_chain)
     # CRUCIAL FIX: Re-initialize orch.chain to use the mocked _rag_chain
     orch.chain = BranchingChain(orch._detect_risk, orch._crisis_chain, orch._rag_chain)
 
-    assert await orch.answer("hello") == "RAG→OK"
+    response = await orch.answer("hello")
+    assert response == {"reply": "RAG→OK"}
 
 
 @pytest.mark.asyncio
@@ -34,13 +36,15 @@ async def test_risk_uses_crisis_chain(monkeypatch):
     monkeypatch.setattr(orch, "_detect_risk", lambda q: True)
 
     mock_crisis_chain = AsyncMock()
+    # Ensure the mock returns the expected dictionary structure
     mock_crisis_chain.ainvoke = AsyncMock(return_value={"result": "CRISIS!!!"})
 
     monkeypatch.setattr(orch, "_crisis_chain", mock_crisis_chain)
     # CRUCIAL FIX: Re-initialize orch.chain to use the mocked _crisis_chain
     orch.chain = BranchingChain(orch._detect_risk, orch._crisis_chain, orch._rag_chain)
 
-    assert await orch.answer("I want to die") == "CRISIS!!!"
+    response = await orch.answer("I want to die")
+    assert response == {"reply": "CRISIS!!!"}
 
 
 @pytest.mark.asyncio
@@ -51,14 +55,16 @@ async def test_answer_fallback_on_error(monkeypatch):
     mock_branching_chain.ainvoke.side_effect = RuntimeError("Simulated chain error")
 
     monkeypatch.setattr(orch, "chain", mock_branching_chain)
-    assert await orch.answer("anything") == "I’m sorry, I’m unable to answer that right now. Please try again later."
+    response = await orch.answer("anything")
+    assert response == {"reply": "I’m sorry, I’m unable to answer that right now. Please try again later."}
 
 
 @pytest.mark.asyncio
 async def test_summarize_session_success(monkeypatch):
     orch = RagOrchestrator()
     mock_summarize_chain = AsyncMock()
-    mock_summarize_chain.ainvoke = AsyncMock(return_value={"output_text": "SESSION SUMMARY"})
+    # summarize_chain with StrOutputParser now returns a string directly
+    mock_summarize_chain.ainvoke = AsyncMock(return_value="SESSION SUMMARY")
 
     monkeypatch.setattr(orch, "summarize_chain", mock_summarize_chain)
 
@@ -101,12 +107,12 @@ def test_detect_risk_functionality():
 
 
 # Helper to create a mock Settings object
-def create_mock_settings(lang: Literal["en", "he"], **kwargs) -> Settings:
+def create_mock_settings(lang: Literal["en", "he"], **kwargs: Any) -> Settings:
     # Provide default values for all required fields in Settings
     # to avoid validation errors when instantiating.
     # Adjust these defaults if your Settings model changes.
     # Ensure values in this dictionary have the correct Python types.
-    defaults = {
+    defaults: Dict[str, Any] = {
         "DATABASE_URL": "sqlite+aiosqlite:///./test_lang.db",
         "SECRET_KEY": "testsecret",
         "ACCESS_TOKEN_EXPIRE_MINUTES": 60,  # Already an int
@@ -126,35 +132,13 @@ def create_mock_settings(lang: Literal["en", "he"], **kwargs) -> Settings:
         "DEMO_USER_PASSWORD": "password",
         "APP_DEFAULT_LANGUAGE": lang,  # Type is Literal["en", "he"]
     }
-    defaults.update(kwargs)
+    # Update defaults with any kwargs passed by the test
+    # This ensures kwargs take precedence if a key is in both.
+    final_args = {**defaults, **kwargs}
 
-    # Prepare a dictionary with explicitly typed values for Mypy's satisfaction
-    # Pydantic will still perform its own validation at runtime.
-    typed_settings_args = {
-        "DATABASE_URL": defaults["DATABASE_URL"],  # Should be str
-        "SECRET_KEY": defaults["SECRET_KEY"],  # Should be str
-        "ACCESS_TOKEN_EXPIRE_MINUTES": defaults["ACCESS_TOKEN_EXPIRE_MINUTES"],  # Should be int
-        "MAX_MESSAGE_LENGTH": defaults["MAX_MESSAGE_LENGTH"],  # Should be int
-        "DEMO_MODE": defaults["DEMO_MODE"],  # Should be bool
-        "DEBUG_SQL": defaults["DEBUG_SQL"],  # Should be bool
-        "CHROMA_DIR": defaults["CHROMA_DIR"],  # Should be str
-        "CHROMA_NAMESPACE_THEORY": defaults["CHROMA_NAMESPACE_THEORY"],  # Should be str
-        "CHROMA_NAMESPACE_PLAN": defaults["CHROMA_NAMESPACE_PLAN"],  # Should be str
-        "CHROMA_NAMESPACE_SESSION": defaults["CHROMA_NAMESPACE_SESSION"],  # Should be str
-        "CHROMA_NAMESPACE_FUTURE": defaults["CHROMA_NAMESPACE_FUTURE"],  # Should be str
-        "OPENAI_API_KEY": defaults["OPENAI_API_KEY"],  # Should be str
-        "LLM_MODEL": defaults["LLM_MODEL"],  # Should be str
-        "LLM_TEMPERATURE": defaults["LLM_TEMPERATURE"],  # Should be float
-        "ASR_TIMEOUT_SECONDS": defaults["ASR_TIMEOUT_SECONDS"],  # Should be float
-        "DEMO_USER_EMAIL": defaults["DEMO_USER_EMAIL"],  # Should be str
-        "DEMO_USER_PASSWORD": defaults["DEMO_USER_PASSWORD"],  # Should be str
-        "APP_DEFAULT_LANGUAGE": defaults["APP_DEFAULT_LANGUAGE"],
-    }
-
-    # Allow kwargs to override these explicitly typed defaults
-    typed_settings_args.update(kwargs)
-
-    return Settings(**typed_settings_args)
+    # Pydantic will perform its own validation at runtime.
+    # This ignore is for Mypy's static analysis struggling with **dict unpacking into Pydantic models.
+    return Settings(**final_args)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -176,20 +160,20 @@ def create_mock_settings(lang: Literal["en", "he"], **kwargs) -> Settings:
     ],
 )
 def test_orchestrator_prompt_loading_by_language(
-    monkeypatch,
-    lang_setting,
-    he_files_exist,
-    en_files_exist,
-    expected_crisis_content,
-    expected_system_content,
-    expect_warning,
+    monkeypatch: pytest.MonkeyPatch,  # Added type hint for monkeypatch
+    lang_setting: Literal["en", "he"],  # Added type hint
+    he_files_exist: bool,  # Added type hint
+    en_files_exist: bool,  # Added type hint
+    expected_crisis_content: str,  # Added type hint
+    expected_system_content: str,  # Added type hint
+    expect_warning: bool,  # Added type hint
 ):
     # 1. Mock get_settings
     mock_settings = create_mock_settings(lang=lang_setting)
     monkeypatch.setattr("app.api.orchestrator.get_settings", lambda: mock_settings)
 
     # 2. Mock os.path.exists
-    def mock_path_exists(path):
+    def mock_path_exists(path: str) -> bool:  # Added type hint
         if lang_setting == "he":
             if path == "templates/crisis_prompt.he.md" or path == "templates/system_prompt.he.md":
                 return he_files_exist
@@ -207,7 +191,7 @@ def test_orchestrator_prompt_loading_by_language(
     monkeypatch.setattr("app.api.orchestrator.os.path.exists", mock_path_exists)
 
     # 3. Mock builtins.open
-    file_contents = {}
+    file_contents: Dict[str, str] = {}
     if he_files_exist:
         file_contents["templates/crisis_prompt.he.md"] = "Hebrew Crisis Prompt"
         file_contents["templates/system_prompt.he.md"] = "Hebrew System Prompt"
@@ -219,7 +203,7 @@ def test_orchestrator_prompt_loading_by_language(
         file_contents["templates/system_prompt.en.md"] = "English System Prompt"
 
     # m_open = mock_open() # We will create fresh mocks inside the side_effect
-    def open_side_effect(path, *args, **kwargs):
+    def open_side_effect(path: str, *args: Any, **kwargs: Any) -> Any:  # Added type hints
         if path in file_contents:
             # Return a new mock_open object configured with the specific read_data for this path
             return mock_open(read_data=file_contents[path])(*args, **kwargs)
@@ -235,10 +219,10 @@ def test_orchestrator_prompt_loading_by_language(
 
     # 4. Mock ChatPromptTemplate.from_template
     # We want to capture the string content passed to from_template
-    actual_prompt_contents_passed = []
+    actual_prompt_contents_passed: List[str] = []
     original_from_template = ChatPromptTemplate.from_template
 
-    def mock_from_template_capture(template_content_str, **kwargs):
+    def mock_from_template_capture(template_content_str: str, **kwargs: Any) -> ChatPromptTemplate:  # Added type hints
         actual_prompt_contents_passed.append(template_content_str)
         # Return a ChatPromptTemplate that includes expected variables
         # to satisfy internal chain validations.
@@ -247,9 +231,7 @@ def test_orchestrator_prompt_loading_by_language(
         if "crisis_prompt" in template_content_str.lower() or (
             expected_crisis_content and expected_crisis_content.lower() in template_content_str.lower()
         ):
-            # print(f"DEBUG: Creating crisis-like mock prompt for: {template_content_str[:50]}")
             return original_from_template(template="dummy crisis {context} {query}", **kwargs)
-        # print(f"DEBUG: Creating RAG-like mock prompt for: {template_content_str[:50]}")
         return original_from_template(template="dummy rag {context} {input}", **kwargs)
 
     monkeypatch.setattr(ChatPromptTemplate, "from_template", mock_from_template_capture)
@@ -260,17 +242,11 @@ def test_orchestrator_prompt_loading_by_language(
 
     # 6. Mock DocumentProcessor to avoid its __init__ side effects (ChromaDB, embeddings)
     mock_dp_instance = MagicMock(spec=DocumentProcessor)
-    # Configure the 'vectordb' attribute on the mock_dp_instance itself
-    # to be another MagicMock.
     mock_vectordb = MagicMock()
 
-    # The object returned by as_retriever() needs to be acceptable to CombinedRetriever.
-    # We can make it a MagicMock that also acts like a BaseRetriever.
-    mock_retriever_instance = MagicMock(spec_set=BaseRetriever)  # spec_set is stricter
-    mock_retriever_instance.get_relevant_documents = MagicMock(
-        return_value=[]
-    )  # Implement required abstract methods if any, or ensure spec handles it
-    mock_retriever_instance.aget_relevant_documents = AsyncMock(return_value=[])
+    mock_retriever_instance = MagicMock(spec_set=BaseRetriever)
+    mock_retriever_instance.get_relevant_documents = MagicMock(return_value=[])
+    mock_retriever_instance.aget_relevant_documents = AsyncMock(return_value=[])  # type: ignore[method-assign]
     mock_vectordb.as_retriever.return_value = mock_retriever_instance
     mock_dp_instance.vectordb = mock_vectordb
     monkeypatch.setattr("app.api.orchestrator.DocumentProcessor", lambda ns: mock_dp_instance)
@@ -279,31 +255,29 @@ def test_orchestrator_prompt_loading_by_language(
     Orchestrator()
 
     # 8. Assertions
-    # Check that from_template was called with the expected content
-    # It will be called twice (once for crisis, once for system)
     assert len(actual_prompt_contents_passed) >= 2, (
         f"ChatPromptTemplate.from_template not called enough times. Called {len(actual_prompt_contents_passed)} times. Content: {actual_prompt_contents_passed}"
     )
 
-    # Check if the expected crisis content was passed to from_template
     assert any(expected_crisis_content in content for content in actual_prompt_contents_passed), (
         f"Expected crisis content '{expected_crisis_content}' not found in {actual_prompt_contents_passed}"
     )
 
-    # Check if the expected system content was passed to from_template
     assert any(expected_system_content in content for content in actual_prompt_contents_passed), (
         f"Expected system content '{expected_system_content}' not found in {actual_prompt_contents_passed}"
     )
 
     if expect_warning:
         assert mock_log_warning.called, "Expected logging.warning to be called for fallback"
-        # More specific checks on warning messages can be added if needed
-        # e.g., any("Falling back to English" in call_args[0][0] for call_args in mock_log_warning.call_args_list)
     else:
-        # Check that no unexpected fallback warnings occurred for non-fallback cases
         unexpected_fallback_logged = False
-        for call_args in mock_log_warning.call_args_list:
-            if "Falling back to English" in call_args[0][0]:  # Check the first arg of the call
-                unexpected_fallback_logged = True
-                break
+        for call_args_tuple in mock_log_warning.call_args_list:
+            # call_args_tuple is like ((arg1, arg2,...), {kwarg1: val1,...})
+            # or just (arg1, arg2,...) if no kwargs
+            # We are interested in the first positional argument of the log call
+            if call_args_tuple and call_args_tuple[0]:  # Check if there are positional args
+                log_message = call_args_tuple[0][0]
+                if isinstance(log_message, str) and "Falling back to" in log_message:
+                    unexpected_fallback_logged = True
+                    break
         assert not unexpected_fallback_logged, f"Unexpected fallback warning logged: {mock_log_warning.call_args_list}"

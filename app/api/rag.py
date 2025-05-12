@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 
-from app.api.orchestrator import RagOrchestrator, get_rag_orchestrator
+from app.api.orchestrator import RagOrchestrator, get_orchestrator
 from app.rag.processor import DocumentProcessor
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -44,7 +44,7 @@ async def ingest_document(
 )
 async def finalize_session(
     session_id: str,
-    orchestrator: RagOrchestrator = Depends(get_rag_orchestrator),
+    orchestrator: RagOrchestrator = Depends(get_orchestrator),
 ):
     summary = await orchestrator.summarize_session(session_id)
     return {"session_id": session_id, "summary": summary}

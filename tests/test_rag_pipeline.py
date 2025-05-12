@@ -1,17 +1,16 @@
 # tests/test_rag_pipeline.py
 
 import uuid
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain.schema import Document
 
-from app.api.orchestrator import Orchestrator, RagOrchestrator, get_rag_orchestrator
+from app.api.orchestrator import Orchestrator, RagOrchestrator, get_orchestrator
 
 # If current_active_user is solely for test_chat_rag_endpoint, keep its import local or ensure it's mockable
 from app.rag.processor import DocumentProcessor
-
-# from app.main import app # app is used by the client fixture
 
 
 # ─── Fixture: TestClient ─────────────────────────────────────────────
@@ -100,22 +99,23 @@ def test_document_processor_ingest_and_query(monkeypatch):
         assert results[0].metadata.get("foo") == "bar"
 
 
-# ─── Test get_rag_orchestrator creates a singleton ────────────────────────
-def test_singleton_rag_orchestrator_instance():  # Removed client fixture as it's not used
+# ─── Test get_orchestrator creates a singleton ────────────────────────
+@pytest.mark.asyncio  # Mark the test as async
+async def test_singleton_rag_orchestrator_instance():  # Make the test function async
     # Create a mock app state if client.app is not essential,
     # or use client if other app setup is needed.
-    # For simplicity, if only app.state is used by get_rag_orchestrator:
+    # For simplicity, if only app.state is used by get_orchestrator:
     class MockApp:
         def __init__(self):
             self.state = type("S", (), {})()  # Simple object for state
 
     class DummyReq:
-        def __init__(self, app_instance):
+        def __init__(self, app_instance: Any):
             self.app = app_instance
 
     mock_app_instance = MockApp()
-    orch1 = get_rag_orchestrator(DummyReq(mock_app_instance))
-    orch2 = get_rag_orchestrator(DummyReq(mock_app_instance))
+    orch1 = await get_orchestrator(DummyReq(mock_app_instance))  # Await the coroutine
+    orch2 = await get_orchestrator(DummyReq(mock_app_instance))  # Await the coroutine
     assert isinstance(orch1, RagOrchestrator)
     assert orch1 is orch2
 
@@ -168,6 +168,13 @@ def stub_summarize(monkeypatch):
 def test_finalize_session_endpoint(client_rag_pipeline: TestClient):  # Use the renamed fixture
     session_id = "sess123"
     res = client_rag_pipeline.post(f"/rag/session/{session_id}/summarize")
+    if res.status_code != 200:  # Add this block for debugging
+        print(f"DEBUG: /rag/session/{session_id}/summarize endpoint failed!")
+        print(f"Status Code: {res.status_code}")
+        try:
+            print(f"Response JSON: {res.json()}")
+        except Exception:
+            print(f"Response Text (not JSON): {res.text}")
     assert res.status_code == 200
     payload = res.json()
     assert payload["session_id"] == session_id

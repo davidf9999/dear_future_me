@@ -1,60 +1,63 @@
-# .github/workflows/ci.yml
-name: CI
+name: CI Pipeline
+
 on:
   push:
-    branches: [main]
+    branches: [main, dev] # Or your specific branches
   pull_request:
     branches: [main]
 
 jobs:
-  test:
+  test-and-lint:
     runs-on: ubuntu-latest
-    env:
-      # Minimal secrets for tests
-      DATABASE_URL: sqlite+aiosqlite:///./test.db
-      SECRET_KEY: gha-test-secret
-      ACCESS_TOKEN_EXPIRE_MINUTES: 60
-      OPENAI_API_KEY: "sk-test"        # avoids openai import errors
+    strategy:
+      matrix:
+        python-version: ["3.11"] # Or your target Python versions
 
     steps:
-      - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install pre-commit
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
 
-      # ── Linters (fail on warnings) ────────────────────────────────────
-      - name: Ruff Lint
-        run: ruff check .
+    - name: Run Ruff Linter
+      run: ruff check .
 
-      - name: Ruff Format check
-        run: ruff format --check .
+    - name: Run Ruff Formatter Check
+      run: ruff format --check .
 
-      # - name: Black Check
-      #   run: black --check .
+    # If you still use Black separately, ensure version consistency
+    # - name: Run Black Check
+    #   run: black --check .
 
-      # - name: Isort Check
-      #   run: isort --check .
+    # - name: Run Mypy
+    #   run: mypy app tests # Or your specific paths
 
-      # - name: Mypy
-      #   run: mypy app tests              # instead of `mypy .`
+    - name: Run database migrations (if applicable)
+      # This step needs environment variables for Settings instantiation
+      run: alembic upgrade head
+      env:
+        DATABASE_URL: sqlite+aiosqlite:///./test_ci.db # Use a CI-specific DB
+        SECRET_KEY: ci_secret_key_for_alembic_test
+        OPENAI_API_KEY: ci_openai_key_for_alembic_test # Required by Settings
+        CHROMA_DB_PATH: ./data/ci_test/chroma_db     # Required by Settings
+        DEMO_USER_EMAIL: ci_demo@example.com         # Required by Settings
+        DEMO_USER_PASSWORD: ci_demopassword        # Required by Settings
+        APP_DEFAULT_LANGUAGE: en                     # Required by Settings
 
-      # ── Migrate test DB (proves Alembic works) ───────────────────────
-      - name: Alembic upgrade
-        run: |
-          alembic upgrade head
-          # show current revision
-          alembic current
-
-      # ── Run pytest suite ─────────────────────────────────────────────
-      - name: Pytest
-        run: pytest -q --disable-warnings
+    - name: Run Pytest
+      run: pytest
+      env:
+        # Pytest conftest.py should set most test-specific env vars
+        # But if any are absolutely needed here and not set by conftest for some reason:
+        # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY_FOR_TESTS }} # Example if tests hit live API
+        PYTHONPATH: .
