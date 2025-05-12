@@ -143,6 +143,10 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+# Ensure a clean slate for SKIP_AUTH to prioritize .env file loading by Pydantic.
+# This prevents an existing shell environment variable from overriding the .env setting.
+unset SKIP_AUTH
+
 echo "Loading environment variables from $ENV_FILE..."
 set -o allexport
 # shellcheck disable=SC1090
