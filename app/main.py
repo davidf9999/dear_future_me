@@ -131,6 +131,8 @@ def create_app() -> FastAPI:
     chat_dependencies = []
     if not app_settings.SKIP_AUTH:
         chat_dependencies.append(Depends(current_active_user))
+        # instance.include_router(chat_router, dependencies=chat_dependencies)  # TO DO
+
         print("INFO: SKIP_AUTH is false. Chat endpoints are protected.")
     else:
         print("INFO: SKIP_AUTH is true. Chat endpoints are NOT protected (authentication bypassed).")
