@@ -128,7 +128,8 @@ STR = UI_STRINGS_STREAMLIT.get(st.session_state.current_language, UI_STRINGS_STR
 st.set_page_config(page_title=STR["page_title"], layout="wide")
 
 # DEBUG: Show auth_token state at the start of each rerun (now after set_page_config)
-st.sidebar.caption(f"DEBUG (top): auth_token = {st.session_state.get('auth_token')}")
+if cfg.STREAMLIT_DEBUG:
+    st.sidebar.caption(f"DEBUG (top): auth_token = {st.session_state.get('auth_token')}")
 
 
 # --- Apply RTL styling if current language is Hebrew ---
@@ -208,8 +209,9 @@ with st.sidebar:
                 try:
                     # This is where login happens
                     api.login(email_input, password_input)  # Sets api.token and api.client.headers
-                    # DEBUG: Check api.token immediately after api.login()
-                    st.sidebar.caption(f"DEBUG (post-api.login): api.token = {api.token}")
+                    # DEBUG: Check api.token immediately after api.login() (conditional)
+                    if cfg.STREAMLIT_DEBUG:
+                        st.sidebar.caption(f"DEBUG (post-api.login): api.token = {api.token}")
                     st.session_state.auth_token = api.token  # Store the token
                     st.session_state.user_email = email_input
                     # api._token is managed internally by SyncAPI after login
@@ -251,7 +253,8 @@ with st.sidebar:
 
 # --- Chat Section (Main Area) ---
 # DEBUG: Show auth_token state just before deciding to show chat UI
-st.caption(f"DEBUG (pre-chat-UI): auth_token = {st.session_state.get('auth_token')}, SKIP_AUTH = {cfg.SKIP_AUTH}")
+if cfg.STREAMLIT_DEBUG:
+    st.caption(f"DEBUG (pre-chat-UI): auth_token = {st.session_state.get('auth_token')}, SKIP_AUTH = {cfg.SKIP_AUTH}")
 
 # if st.session_state.auth_token:
 if cfg.SKIP_AUTH or st.session_state.auth_token:
@@ -286,7 +289,8 @@ if cfg.SKIP_AUTH or st.session_state.auth_token:
                 assistant_response = f"Sorry, I encountered an error: {e}"  # Provide error to user
                 message_placeholder.markdown(assistant_response)
                 st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-    st.write("DEBUG: Chat UI should be visible.")  # Add this to confirm this block is entered
+    if cfg.STREAMLIT_DEBUG:
+        st.write("DEBUG: Chat UI should be visible.")  # Add this to confirm this block is entered
 else:
     # Show login message only if auth is NOT skipped AND no auth token exists
     st.info(STR["not_logged_in_main_message"])
