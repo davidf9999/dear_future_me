@@ -1,59 +1,46 @@
+version: '3.8'
 
 services:
-  chroma:
-    image: chromadb/chroma:latest
-    container_name: chroma
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]   # built-in
-      interval: 30s
-      timeout: 5s
-      retries: 3
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # image: yourusername/fastapi-backend # Optionally, you can tag and push images
     ports:
-      - "8001:8000"          # hostPort:containerPort
+      - "8000:80" # Host:Container
     volumes:
-      - chroma_data:/data
+      - ./backend/app:/code/app # For development, mounts local code
     environment:
-      - CHROMA_SERVER_HOST=0.0.0.0
-      - CHROMA_SERVER_HTTP_PORT=8000
+      - PYTHONUNBUFFERED=1 # Ensures print statements and logs appear without delay
+    # restart: unless-stopped # Optional: for production-like behavior
 
-  web:
-    build: .
-    container_name: dear_future_me
-    restart: unless-stopped
-    depends_on:
-      chroma:
-        condition: service_healthy      # wait for vector store
-    env_file:
-      - .env
-    environment:
-      - CHROMA_DIR=/data                # 〈── matches processor.py
-      # Ensure the FastAPI app knows where Chroma is
-      - CHROMA_SERVER_HOST=chroma       # Use the service name
-      - CHROMA_SERVER_HTTP_PORT=8000    # Use the container port
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile # We created frontend/Dockerfile
+    # image: yourusername/streamlit-frontend # Optionally, you can tag and push images
+    ports:
+      - "8501:8501"
     volumes:
-      - chroma_data:/data               # mount same volume read-only
-    ports:
-      - "8000:8000"
-
-  streamlit:
-    build: .                            # Reuse the same Dockerfile if it includes Streamlit dependencies
-    container_name: dear_future_me_streamlit
-    restart: unless-stopped
+      - ./frontend:/app # Mounts local frontend code for development
+                        # Ensure WORKDIR in frontend/Dockerfile is /app
     depends_on:
-      web:
-        condition: service_started      # Wait for the web (FastAPI) service
-    env_file:
-      - .env
+      - backend     # Ensures backend starts before frontend
     environment:
-      - DFM_API_URL=http://web:8000     # Point Streamlit to the web service using its service name and container port
-    ports:
-      - "8501:8501"                     # Map host port 8501 to container port 8501 (Streamlit default)
-    command: ["streamlit", "run", "streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"] # Command to run Streamlit
+      - PYTHONUNBUFFERED=1
+      - STREAMLIT_SERVER_PORT=8501
+      # The Streamlit app can use this URL to communicate with the FastAPI backend.
+      # 'backend' is the service name defined above and is resolvable within Docker's network.
+      - BACKEND_URL=http://backend:80
+    # This command overrides the CMD in frontend/Dockerfile.
+    # --server.address=0.0.0.0 is crucial for Docker.
+    # --server.enableCORS=false and --server.enableXsrfProtection=false can be helpful
+    # in containerized setups, especially if you embed Streamlit or access it across different origins.
+    # Adjust or remove these flags based on your specific needs.
+    command: streamlit run main.py --server.port=8501 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
+    # restart: unless-stopped # Optional: for production-like behavior
 
-networks:
-  default:
-    name: dfm_net
-
-volumes:
-  chroma_data:
+# Optional: Define a default network if needed, though Docker Compose creates one by default.
+# networks:
+#   app-network:
+#     driver: bridge
