@@ -22,7 +22,6 @@ except ImportError as e:
     )
     st.stop()
 
-
 # --- App Configuration & Initialization ---
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))  # Load .env from project root
 
@@ -102,17 +101,6 @@ if "api_client" not in st.session_state:
         st.error(f"Failed to initialize API client: {e}")
         st.stop()
 
-# --- Handle SKIP_AUTH ---
-# if cfg.SKIP_AUTH and "auth_token" not in st.session_state: # Check if auth_token is not already set (e.g. by a previous login attempt)
-#     st.session_state.auth_token = "skipped_auth_placeholder_token" # Indicate auth is skipped
-#     st.session_state.user_email = "skipped_auth_user@example.com" # Placeholder email
-#     # Also update the token in the api_client instance if it exists
-#     if "api_client" in st.session_state:
-#         st.session_state.api_client.token = st.session_state.auth_token
-#         # Important: If SKIP_AUTH is true, we should ensure no "Authorization" header is sent
-#         # or that the backend correctly ignores it. The current SyncAPI.login() sets this header.
-#         # For SKIP_AUTH, we are not calling login(), so the header might not be set, which is good.
-#     st.session_state.messages = [] # Ensure messages are cleared if "logging in" this way
 # --- Handle SKIP_AUTH and initial session state for auth ---
 if cfg.SKIP_AUTH:
     # If SKIP_AUTH is true, force the state to reflect skipped authentication
@@ -133,11 +121,15 @@ elif "auth_token" not in st.session_state:  # If not SKIP_AUTH and no token, ini
         del st.session_state.messages_cleared_for_skip_auth
 
 api: SyncAPI = st.session_state.api_client
+# Define STR after cfg and session_state.current_language are available
 STR = UI_STRINGS_STREAMLIT.get(st.session_state.current_language, UI_STRINGS_STREAMLIT["en"])
 
-# --- Page Setup ---
-st.set_page_config(page_title=STR["page_title"], layout="wide")  # Use "wide" for better chat layout
-st.title(STR["header"])
+# --- Page Setup (MUST BE THE FIRST STREAMLIT COMMAND, now that STR is defined) ---
+st.set_page_config(page_title=STR["page_title"], layout="wide")
+
+# DEBUG: Show auth_token state at the start of each rerun (now after set_page_config)
+st.sidebar.caption(f"DEBUG (top): auth_token = {st.session_state.get('auth_token')}")
+
 
 # --- Apply RTL styling if current language is Hebrew ---
 if st.session_state.current_language == "he":
@@ -184,6 +176,9 @@ if st.session_state.current_language == "he":
         unsafe_allow_html=True,
     )
 
+# --- Main Title (Can be after set_page_config) ---
+st.title(STR["header"])
+
 # --- Language Selection (Optional UI Element) ---
 # lang_options = {"English": "en", "עברית (Hebrew)": "he"}
 # selected_lang_display = st.sidebar.selectbox(
@@ -211,8 +206,11 @@ with st.sidebar:
         if col1.button(STR["login_button"], key="login_btn_streamlit", use_container_width=True):
             if email_input and password_input:
                 try:
-                    token = api.login(email_input, password_input)
-                    st.session_state.auth_token = token
+                    # This is where login happens
+                    api.login(email_input, password_input)  # Sets api.token and api.client.headers
+                    # DEBUG: Check api.token immediately after api.login()
+                    st.sidebar.caption(f"DEBUG (post-api.login): api.token = {api.token}")
+                    st.session_state.auth_token = api.token  # Store the token
                     st.session_state.user_email = email_input
                     # api._token is managed internally by SyncAPI after login
                     st.session_state.messages = []  # Clear messages on new login
@@ -236,7 +234,9 @@ with st.sidebar:
         if st.button(STR["logout_button"], key="logout_btn_streamlit", use_container_width=True):
             st.session_state.auth_token = None
             st.session_state.user_email = None
-            api._token = None  # Explicitly clear token in shared API client instance
+            api.token = None  # Explicitly clear token in shared API client instance
+            if "Authorization" in api.client.headers:  # Also clear header from httpx client
+                del api.client.headers["Authorization"]
             st.session_state.messages = []
             st.rerun()
 
@@ -250,6 +250,9 @@ with st.sidebar:
 
 
 # --- Chat Section (Main Area) ---
+# DEBUG: Show auth_token state just before deciding to show chat UI
+st.caption(f"DEBUG (pre-chat-UI): auth_token = {st.session_state.get('auth_token')}, SKIP_AUTH = {cfg.SKIP_AUTH}")
+
 # if st.session_state.auth_token:
 if cfg.SKIP_AUTH or st.session_state.auth_token:
     # Show chat interface if auth is skipped OR if a real auth token exists
@@ -283,6 +286,7 @@ if cfg.SKIP_AUTH or st.session_state.auth_token:
                 assistant_response = f"Sorry, I encountered an error: {e}"  # Provide error to user
                 message_placeholder.markdown(assistant_response)
                 st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+    st.write("DEBUG: Chat UI should be visible.")  # Add this to confirm this block is entered
 else:
     # Show login message only if auth is NOT skipped AND no auth token exists
     st.info(STR["not_logged_in_main_message"])
