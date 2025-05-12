@@ -166,11 +166,11 @@ fi
 STREAMLIT_LOG_FILE="./logs/${ENV_TYPE}_streamlit.log"
 echo "Starting Streamlit app ($ENV_TYPE) on port $STREAMLIT_SERVER_PORT..."
 if [ "$ENV_TYPE" == "prod" ]; then
-    nohup streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --server.headless true > "$STREAMLIT_LOG_FILE" 2>&1 &
+    nohup streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --server.headless true --logger.level=debug > "$STREAMLIT_LOG_FILE" 2>&1 &
     echo $! > "$STREAMLIT_PID_FILE"
     echo "Streamlit ($ENV_TYPE) app started. PID: $(cat "$STREAMLIT_PID_FILE"). Logs: $STREAMLIT_LOG_FILE"
 else # dev
-    streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" &
+    streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --logger.level=debug &
     echo $! > "$STREAMLIT_PID_FILE"
     echo "Streamlit ($ENV_TYPE) app started. PID: $(cat "$STREAMLIT_PID_FILE")."
 fi

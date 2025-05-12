@@ -37,7 +37,8 @@ services:
     # --server.enableCORS=false and --server.enableXsrfProtection=false can be helpful
     # in containerized setups, especially if you embed Streamlit or access it across different origins.
     # Adjust or remove these flags based on your specific needs.
-    command: streamlit run main.py --server.port=8501 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false
+    # Added --logger.level=debug for more verbose logs.
+    command: streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false --logger.level=debug
     # restart: unless-stopped # Optional: for production-like behavior
 
 # Optional: Define a default network if needed, though Docker Compose creates one by default.
