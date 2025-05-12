@@ -1,0 +1,5 @@
+streamlit
+python-dotenv
+# Add any other direct dependencies of streamlit_app.py here
+# For example, if it directly uses httpx for the api_client:
+# httpx
