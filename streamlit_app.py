@@ -210,10 +210,10 @@ with st.sidebar:
     st.sidebar.markdown("---")  # Separator
     # Add a link to the README on GitHub (replace with your actual repo URL)
     # Uncomment if the repo will be public
-    # readme_url = (
-    #     "https://github.com/dfront/dear_future_me/blob/main/README.md"  # FIXME: Update with your actual repo URL
-    # )
-    # st.sidebar.markdown(f"[{STR.get('help_link_text', 'Help / Readme')}]({readme_url})")
+    readme_url = (
+        "https://github.com/davidf9999/dear_future_me/blob/main/README.md"  # FIXME: Update with your actual repo URL
+    )
+    st.sidebar.markdown(f"[{STR.get('help_link_text', 'Help / Readme')}]({readme_url})")
 
 
 # --- Chat Section (Main Area) ---

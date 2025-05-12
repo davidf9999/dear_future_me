@@ -124,8 +124,17 @@ def create_app() -> FastAPI:
         tags=["users"],
     )
 
-    # Chat endpoints - ALWAYS protected
-    instance.include_router(chat_router, dependencies=[Depends(current_active_user)])
+    # # Chat endpoints - ALWAYS protected
+    # instance.include_router(chat_router, dependencies=[Depends(current_active_user)])
+    # or
+    # Chat endpoints - Conditionally protected
+    chat_dependencies = []
+    if not app_settings.SKIP_AUTH:
+        chat_dependencies.append(Depends(current_active_user))
+        print("INFO: SKIP_AUTH is false. Chat endpoints are protected.")
+    else:
+        print("INFO: SKIP_AUTH is true. Chat endpoints are NOT protected (authentication bypassed).")
+    instance.include_router(chat_router, dependencies=chat_dependencies)
 
     # RAG endpoints
     instance.include_router(rag_router)

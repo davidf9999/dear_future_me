@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # ── Flags ─────────────────────────────────────────────────
     DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")  # Server's DEMO_MODE, e.g., for DB reset
     DEBUG_SQL: bool = Field(False, validation_alias="DEBUG_SQL")
+    SKIP_AUTH: bool = Field(False, validation_alias="SKIP_AUTH")
 
     # ── Chat settings ─────────────────────────────────────────
     MAX_MESSAGE_LENGTH: int = Field(1000)

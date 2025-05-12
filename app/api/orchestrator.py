@@ -4,11 +4,11 @@ from typing import Any, Dict, List, cast
 
 from fastapi import Request
 from langchain.prompts import ChatPromptTemplate
-from langchain_community.chat_models import ChatOpenAI
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_openai import ChatOpenAI
 
 from app.core.settings import get_settings
 from app.rag.processor import DocumentProcessor
