@@ -3,45 +3,63 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    # image: yourusername/fastapi-backend # Optionally, you can tag and push images
+      context: . # Changed context to project root for better code copying in Dockerfile
+      dockerfile: backend/Dockerfile # Specify Dockerfile location within new context
     ports:
       - "8000:80" # Host:Container
     volumes:
-      - ./backend/app:/code/app # For development, mounts local code
+      # Mount the actual application code from project root's app/
+      # This ensures your local app/ directory is used during development
+      - ./app:/code/app
+      # Mount shared project code (like clients, core) if streamlit_app also needs it
+      # and it's not part of the frontend's direct build context or copied separately.
+      # For now, assuming streamlit_app.py in frontend/ will handle its imports.
+      - ./templates:/code/templates # Mount templates if backend needs them directly
+      - project_data:/data # All persistent data for backend will go here
     environment:
       - PYTHONUNBUFFERED=1 # Ensures print statements and logs appear without delay
+    # Docker Compose automatically loads a .env file from the project root.
+    # If you need to specify a different one or multiple, use env_file:
+    # env_file:
+    #   - .env
+    networks:
+      - app_network
     # restart: unless-stopped # Optional: for production-like behavior
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile # We created frontend/Dockerfile
-    # image: yourusername/streamlit-frontend # Optionally, you can tag and push images
+      context: ./frontend # Build context is the frontend directory
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     volumes:
-      - ./frontend:/app # Mounts local frontend code for development
-                        # Ensure WORKDIR in frontend/Dockerfile is /app
+      # Mounts local frontend code (now including streamlit_app.py)
+      # and any other files from the frontend directory needed at runtime.
+      - ./frontend:/app
+      # If streamlit_app.py needs to import from the root 'app' package,
+      # and this isn't handled by Dockerfile COPY or PYTHONPATH adjustments:
+      - ./app:/project_app_root/app # Mount root app dir to a known location
+      - ./templates:/app/templates # Mount templates if frontend needs them directly
     depends_on:
       - backend     # Ensures backend starts before frontend
     environment:
       - PYTHONUNBUFFERED=1
       - STREAMLIT_SERVER_PORT=8501
-      # The Streamlit app can use this URL to communicate with the FastAPI backend.
-      # 'backend' is the service name defined above and is resolvable within Docker's network.
-      - BACKEND_URL=http://backend:80
-    # This command overrides the CMD in frontend/Dockerfile.
-    # --server.address=0.0.0.0 is crucial for Docker.
-    # --server.enableCORS=false and --server.enableXsrfProtection=false can be helpful
-    # in containerized setups, especially if you embed Streamlit or access it across different origins.
-    # Adjust or remove these flags based on your specific needs.
-    # Added --logger.level=debug for more verbose logs.
+      # The Streamlit app (streamlit_app.py) uses DFM_API_URL.
+      - DFM_API_URL=http://backend:80
+      # Add PYTHONPATH if streamlit_app.py needs to import from the mounted root app package
+      - PYTHONPATH=/app:/project_app_root # /app is WORKDIR, /project_app_root for root 'app'
+    # The command will now correctly find streamlit_app.py in /app (which is frontend/ on host)
     command: streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false --logger.level=debug
+    networks:
+      - app_network
     # restart: unless-stopped # Optional: for production-like behavior
 
-# Optional: Define a default network if needed, though Docker Compose creates one by default.
-# networks:
-#   app-network:
-#     driver: bridge
+# Define a named volume for persistent data
+volumes:
+  project_data:
+
+# Define a default network
+networks:
+  app_network:
+    driver: bridge

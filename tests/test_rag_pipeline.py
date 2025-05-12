@@ -127,7 +127,7 @@ async def test_singleton_rag_orchestrator_instance():  # Make the test function 
 def test_chat_rag_endpoint(client_rag_pipeline: TestClient, monkeypatch):  # Use the renamed fixture
     # Stub Orchestrator.answer with an async function
     async def fake_answer(self, q):
-        return "Echo: " + q
+        return {"reply": "Echo: " + q}  # Return a dictionary
 
     monkeypatch.setattr(Orchestrator, "answer", fake_answer)
 

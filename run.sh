@@ -49,7 +49,7 @@ check_process_status() {
     local pid
     pid=$(cat "$pid_file")
     # Check if the process with this PID is actually running
-    if ps -p "$pid" -o comm= &>/dev/null; then
+    if ps -p "$pid" -o comm= >/dev/null; then
       echo "PID file ($pid_file) exists. Process with PID $pid is RUNNING."
       echo "Details (PID, PPID, STAT, ELAPSED, CMD):"
       ps -p "$pid" -o pid,ppid,stat,etime,args --no-headers
@@ -84,12 +84,12 @@ if [ "$ACTION" == "status" ]; then
     # shellcheck disable=SC1091
     source ".env.dev" # Load for DFM_API_PORT, STREAMLIT_SERVER_PORT
     check_process_status "FastAPI Server" "$FASTAPI_PID_FILE_DEV" "app\.main:app.*--port $DFM_API_PORT.*--reload" "dev"
-    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_DEV" "streamlit run streamlit_app\.py.*--server\.port $STREAMLIT_SERVER_PORT" "dev"
+    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_DEV" "streamlit run frontend/streamlit_app\.py.*--server\.port $STREAMLIT_SERVER_PORT" "dev"
     set +o allexport # Unset variables after sourcing
   else
     echo "WARNING: .env.dev not found. Cannot perform specific ps search for dev ports."
     check_process_status "FastAPI Server" "$FASTAPI_PID_FILE_DEV" "app\.main:app.*--reload" "dev"
-    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_DEV" "streamlit run streamlit_app\.py" "dev"
+    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_DEV" "streamlit run frontend/streamlit_app\.py" "dev"
   fi
 
   # Check Prod
@@ -99,12 +99,12 @@ if [ "$ACTION" == "status" ]; then
     # shellcheck disable=SC1091
     source ".env.prod" # Load for DFM_API_PORT, STREAMLIT_SERVER_PORT
     check_process_status "FastAPI Server" "$FASTAPI_PID_FILE_PROD" "app\.main:app.*--port $DFM_API_PORT" "prod"
-    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_PROD" "streamlit run streamlit_app\.py.*--server\.port $STREAMLIT_SERVER_PORT" "prod"
+    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_PROD" "streamlit run frontend/streamlit_app\.py.*--server\.port $STREAMLIT_SERVER_PORT" "prod"
     set +o allexport # Unset variables after sourcing
   else
     echo "WARNING: .env.prod not found. Cannot perform specific ps search for prod ports."
     check_process_status "FastAPI Server" "$FASTAPI_PID_FILE_PROD" "app\.main:app" "prod"
-    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_PROD" "streamlit run streamlit_app\.py" "prod"
+    check_process_status "Streamlit App" "$STREAMLIT_PID_FILE_PROD" "streamlit run frontend/streamlit_app\.py" "prod"
   fi
   exit 0
 fi
@@ -155,13 +155,14 @@ source "$ENV_FILE"
 set +o allexport
 
 # --- Create data directories (if defined in .env files) ---
-if [ -n "$DATABASE_URL" ] && [[ "$DATABASE_URL" == sqlite*:///./* ]]; then
-    DB_PATH_RELATIVE=$(echo "$DATABASE_URL" | sed 's|sqlite.*:///./||')
-    mkdir -p "$(dirname "$DB_PATH_RELATIVE")"
-    echo "Ensured database directory exists for: $DB_PATH_RELATIVE"
+# These paths are relative to the project root where run.sh is executed.
+# Ensure these match what your app expects when running locally (not in Docker).
+if [ -n "$SQLITE_DB_PATH" ]; then # Using SQLITE_DB_PATH from .env.dev/.env.prod
+    mkdir -p "$(dirname "$SQLITE_DB_PATH")"
+    echo "Ensured database directory exists for: $SQLITE_DB_PATH"
 fi
 
-if [ -n "$CHROMA_DB_PATH" ]; then
+if [ -n "$CHROMA_DB_PATH" ]; then # Using CHROMA_DB_PATH from .env.dev/.env.prod
     mkdir -p "$CHROMA_DB_PATH"
     echo "Ensured ChromaDB directory exists: $CHROMA_DB_PATH"
 fi
@@ -180,13 +181,17 @@ if [ "$SERVICE_NAME" == "fastapi" ]; then
 elif [ "$SERVICE_NAME" == "streamlit" ]; then
     echo ""
     echo "Starting Streamlit app ($ENV_TYPE) on port $STREAMLIT_SERVER_PORT in foreground..."
+    echo "Streamlit app location: frontend/streamlit_app.py"
     echo "Streamlit logs will appear below. Press Ctrl+C to stop."
     echo "-----------------------------------------------------"
+    # Adjust PYTHONPATH for local run if streamlit_app.py needs to import from root 'app'
+    # This assumes run.sh is executed from the project root.
+    export PYTHONPATH="${PYTHONPATH}:." 
     if [ "$ENV_TYPE" == "prod" ]; then
         # For prod, server.headless is good. Debug logging can be noisy but useful.
-        streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --server.headless true --logger.level=debug
+        streamlit run frontend/streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --server.headless true --logger.level=debug
     else # dev
-        streamlit run streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --logger.level=debug
+        streamlit run frontend/streamlit_app.py --server.port "$STREAMLIT_SERVER_PORT" --server.address "$DFM_API_HOST" --logger.level=debug
     fi
 else
     # This case should not be reached due to argument parsing at the top, but good for safety.

@@ -18,7 +18,7 @@ async def test_chat_endpoint_authenticated(client: TestClient, monkeypatch):
     """
 
     async def mock_answer(self, message: str):
-        return f"echo: {message}"
+        return {"reply": f"echo: {message}"}  # Return a dictionary
 
     monkeypatch.setattr(Orchestrator, "answer", mock_answer)
 
