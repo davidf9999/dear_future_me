@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 # Copy application code
 # Ensure ownership is set to the new user
 COPY ./app /code/app
+COPY ./templates /code/templates
 # RUN chown -R appuser:appgroup /code
 
 EXPOSE 80
@@ -22,7 +23,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
 # Ensure the entire /code directory is owned by appuser first
 RUN chown -R appuser:appgroup /code
 
-USER appuser # Switch to appuser BEFORE creating data dirs
+# Switch to appuser BEFORE creating data dirs
+USER appuser
 
 # Create data directory as appuser for ephemeral SQLite and ChromaDB
 RUN mkdir -p /code/data/prod
