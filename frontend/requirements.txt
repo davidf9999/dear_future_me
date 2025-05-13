@@ -1,5 +1,6 @@
 streamlit
 python-dotenv
-# Add any other direct dependencies of streamlit_app.py here
-# For example, if it directly uses httpx for the api_client:
-# httpx
+httpx
+pydantic
+pydantic-settings
+fastapi-users # Required due to app.auth.schemas being used by app.clients.api_client

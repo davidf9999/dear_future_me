@@ -4,8 +4,13 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 # Create a non-root user and group
-RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
-
+# Create home directory for appuser, set ownership, and then create user
+# Also pre-create .streamlit directory and set its ownership
+RUN groupadd -r appgroup && \
+    mkdir -p /home/appuser/.streamlit && \
+    useradd --no-log-init -r -g appgroup -d /home/appuser -s /bin/bash appuser && \
+    chown -R appuser:appgroup /home/appuser
+    
 # Copy requirements first to leverage Docker cache
 # Make sure you have a requirements.txt in your frontend directory
 # for Streamlit and any other frontend-specific dependencies.

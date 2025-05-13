@@ -3,7 +3,6 @@ import os
 import sys
 
 import streamlit as st
-from dotenv import load_dotenv
 
 # Add project root to sys.path to allow 'from app...' imports
 # This is necessary if streamlit_app.py is in the project root
@@ -23,7 +22,6 @@ except ImportError as e:
     st.stop()
 
 # --- App Configuration & Initialization ---
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))  # Load .env from project root
 
 try:
     cfg: Settings = get_settings()
