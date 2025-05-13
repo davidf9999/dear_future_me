@@ -28,4 +28,4 @@ EXPOSE 8501
 
 # Default command to run Streamlit.
 # This can be overridden by the 'command' in docker-compose.yml.
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false", "--logger.level=info"]
