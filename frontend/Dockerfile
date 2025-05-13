@@ -10,6 +10,7 @@ RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 # Make sure you have a requirements.txt in your frontend directory
 # for Streamlit and any other frontend-specific dependencies.
 COPY --chown=appuser:appgroup ./requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
 # Copy the rest of the application code

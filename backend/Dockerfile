@@ -7,7 +7,8 @@ WORKDIR /code
 RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 
 # Copy requirements first to leverage Docker cache
-COPY ./requirements.txt /code/requirements.txt
+COPY ./backend/requirements.txt /code/requirements.txt
+RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
 # Copy application code

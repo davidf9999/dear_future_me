@@ -32,4 +32,3 @@ transformers>=4.39
 sentence-transformers>=2.5
 twilio>=8.0
 rich>=13.0
-streamlit
