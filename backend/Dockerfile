@@ -15,16 +15,23 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 # Ensure ownership is set to the new user
 COPY ./app /code/app
 COPY ./templates /code/templates
-# RUN chown -R appuser:appgroup /code
 
 EXPOSE 80
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
 
-# Ensure the entire /code directory is owned by appuser first
+# Create the base data directory structure as root first
+RUN mkdir -p /code/data/prod
+
+# Now, change ownership of everything under /code to appuser
 RUN chown -R appuser:appgroup /code
 
 # Switch to appuser BEFORE creating data dirs
 USER appuser
 
 # Create data directory as appuser for ephemeral SQLite and ChromaDB
-RUN mkdir -p /code/data/prod
+# This RUN mkdir -p is now more of a verification or no-op if the dir exists,
+# but it's good to keep as it ensures the appuser context.
+# Alternatively, since appuser now owns /code/data, it can create /code/data/prod
+# if it wasn't already created by the root mkdir.
+# For clarity and to ensure appuser definitely can operate here:
+RUN ls -ld /code/data && ls -ld /code/data/prod || mkdir -p /code/data/prod
