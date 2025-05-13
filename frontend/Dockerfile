@@ -14,7 +14,8 @@ RUN groupadd -r appgroup && \
 # Copy requirements first to leverage Docker cache
 # Make sure you have a requirements.txt in your frontend directory
 # for Streamlit and any other frontend-specific dependencies.
-COPY --chown=appuser:appgroup ./requirements.txt /app/requirements.txt
+COPY --chown=appuser:appgroup ./frontend/requirements.txt /app/requirements.txt
+
 RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
