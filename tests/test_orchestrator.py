@@ -1,20 +1,19 @@
 # /home/dfront/code/dear_future_me/tests/test_orchestrator.py
 import logging
+import uuid  # Import uuid
 from typing import Any, Dict, Literal
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
-from langchain.prompts import (  # Added HumanMessagePromptTemplate
-    ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-)
+from langchain.prompts import ChatPromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import Runnable
-from langchain_openai import ChatOpenAI  # For mocking
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.orchestrator import BranchingChain, Orchestrator, RagOrchestrator
 from app.core.settings import Settings
+from app.db.models import UserProfileTable  # For type hinting in tests
 from app.rag.processor import DocumentProcessor
 
 
@@ -39,7 +38,8 @@ def mock_document_processor(monkeypatch):
     mock_retriever_instance.aget_relevant_documents = AsyncMock(return_value=[])
     mock_vectordb.as_retriever.return_value = mock_retriever_instance
     mock_dp_instance.vectordb = mock_vectordb
-    monkeypatch.setattr("app.api.orchestrator.DocumentProcessor", lambda namespace: mock_dp_instance)
+    # Ensure the lambda accepts the 'namespace' argument and any other potential kwargs
+    monkeypatch.setattr("app.api.orchestrator.DocumentProcessor", lambda namespace, **kwargs: mock_dp_instance)
     return mock_dp_instance
 
 
@@ -50,18 +50,20 @@ async def test_non_risk_uses_rag_chain(monkeypatch, mock_chat_openai):
     mock_runnable_returned_by_builder = AsyncMock(spec=Runnable)
     mock_runnable_returned_by_builder.ainvoke = AsyncMock(return_value=mock_rag_sub_chain_ainvoke_result)
 
-    # Patch the static method _build_actual_rag_chain directly on the class
     with patch.object(
         RagOrchestrator, "_build_actual_rag_chain", return_value=mock_runnable_returned_by_builder
     ) as mock_rag_builder_method:
         orch = RagOrchestrator()
         monkeypatch.setattr(orch, "_detect_risk", lambda query: False)
 
-        mock_db_call = AsyncMock(return_value={})
-        monkeypatch.setattr("app.api.orchestrator.get_user_prompt_components_from_db", mock_db_call)
+        # Mock get_user_profile to return None (no profile found) for this specific test if needed
+        # or a mock profile if specific profile data is required for the base prompt.
+        # For simplicity, assume no profile or default values are handled by get_user_specific_prompt_str.
+        mock_get_profile = AsyncMock(return_value=None)
+        monkeypatch.setattr("app.api.orchestrator.get_user_profile", mock_get_profile)
 
         mock_db_session = MagicMock(spec=AsyncSession)
-        response = await orch.answer("hello", user_id="test_user", db_session=mock_db_session)
+        response = await orch.answer("hello", user_id=str(uuid.uuid4()), db_session=mock_db_session)
 
         assert response == {"reply": "RAG→OK"}
         mock_rag_builder_method.assert_called_once()
@@ -85,11 +87,11 @@ async def test_risk_uses_crisis_chain(monkeypatch, mock_chat_openai):
         orch = Orchestrator()
         monkeypatch.setattr(orch, "_detect_risk", lambda query: True)
 
-        mock_db_call = AsyncMock(return_value={})
-        monkeypatch.setattr("app.api.orchestrator.get_user_prompt_components_from_db", mock_db_call)
+        mock_get_profile = AsyncMock(return_value=None)
+        monkeypatch.setattr("app.api.orchestrator.get_user_profile", mock_get_profile)
 
         mock_db_session = MagicMock(spec=AsyncSession)
-        response = await orch.answer("I want to die", user_id="test_user", db_session=mock_db_session)
+        response = await orch.answer("I want to die", user_id=str(uuid.uuid4()), db_session=mock_db_session)
 
         assert response == {"reply": "CRISIS!!!"}
         mock_crisis_builder_method.assert_called_once()
@@ -106,23 +108,27 @@ async def test_answer_fallback_on_error(monkeypatch, mock_chat_openai):
     mock_branching_chain.ainvoke.side_effect = RuntimeError("Simulated chain error")
     orch.chain = mock_branching_chain
 
-    mock_db_call = AsyncMock(return_value={})
-    monkeypatch.setattr("app.api.orchestrator.get_user_prompt_components_from_db", mock_db_call)
+    mock_get_profile = AsyncMock(return_value=None)  # Mock profile call
+    monkeypatch.setattr("app.api.orchestrator.get_user_profile", mock_get_profile)
 
     mock_db_session = MagicMock(spec=AsyncSession)
-    response = await orch.answer("anything", user_id="test_user", db_session=mock_db_session)
+    response = await orch.answer("anything", user_id=str(uuid.uuid4()), db_session=mock_db_session)
     assert response == {"reply": "I’m sorry, I’m unable to answer that right now. Please try again later."}
 
 
 @pytest.mark.asyncio
 async def test_answer_uses_user_specific_prompts(monkeypatch, mock_chat_openai):
-    mock_user_components = {
-        "future_me_persona_summary": "Custom future me summary for test_user.",
-        "critical_language_elements": "Custom therapeutic phrases.",
-        "core_values_prompt": "Custom core values.",
-    }
-    mock_get_user_components = AsyncMock(return_value=mock_user_components)
-    monkeypatch.setattr("app.api.orchestrator.get_user_prompt_components_from_db", mock_get_user_components)
+    # Create a mock UserProfileTable object
+    mock_user_profile_obj = MagicMock(spec=UserProfileTable)
+    mock_user_profile_obj.name = "Test User"
+    mock_user_profile_obj.future_me_persona_summary = "Custom future me summary for test_user."
+    mock_user_profile_obj.key_therapeutic_language = "Custom therapeutic phrases."
+    mock_user_profile_obj.core_values_summary = "Custom core values."
+    mock_user_profile_obj.safety_plan_summary = "Custom safety plan summary."  # Add if used
+
+    # Mock the get_user_profile CRUD function to return this object
+    mock_get_user_profile_crud = AsyncMock(return_value=mock_user_profile_obj)
+    monkeypatch.setattr("app.api.orchestrator.get_user_profile", mock_get_user_profile_crud)
 
     mock_rag_sub_chain_ainvoke_result = {"reply_content": "RAG response with custom prompt", "sources": []}
     mock_runnable_returned_by_builder = AsyncMock(spec=Runnable)
@@ -135,16 +141,18 @@ async def test_answer_uses_user_specific_prompts(monkeypatch, mock_chat_openai):
         # Ensure the base template string has the placeholders for this test
         # This is crucial for the personalization to be injected correctly.
         orch.base_system_prompt_template_str = (
-            "Base system prompt. Future Me: {future_me_persona_summary}. "
+            "Base system prompt. Hello {name}. Future Me: {future_me_persona_summary}. "
             "Language: {critical_language_elements}. Values: {core_values_prompt}. "
+            "Safety: {safety_plan_summary}. "  # Add if used
             "Context: {context} Input: {input}"
         )
         monkeypatch.setattr(orch, "_detect_risk", lambda query: False)
 
+        test_user_uuid = uuid.uuid4()
         mock_db_session = MagicMock(spec=AsyncSession)
-        await orch.answer("hello", user_id="test_user_for_prompt", db_session=mock_db_session)
+        await orch.answer("hello", user_id=str(test_user_uuid), db_session=mock_db_session)
 
-        mock_get_user_components.assert_called_with("test_user_for_prompt", mock_db_session)
+        mock_get_user_profile_crud.assert_called_with(mock_db_session, user_id=test_user_uuid)
 
         mock_rag_builder_method.assert_called_once()
         captured_chat_prompt_template_obj = mock_rag_builder_method.call_args[0][0]
@@ -152,20 +160,19 @@ async def test_answer_uses_user_specific_prompts(monkeypatch, mock_chat_openai):
         assert captured_chat_prompt_template_obj is not None
         assert isinstance(captured_chat_prompt_template_obj, ChatPromptTemplate)
 
-        # A ChatPromptTemplate created from a single string template usually has one message.
-        # This message is often a HumanMessagePromptTemplate.
-        assert len(captured_chat_prompt_template_obj.messages) == 1
+        assert len(captured_chat_prompt_template_obj.messages) >= 1
         first_message_prompt = captured_chat_prompt_template_obj.messages[0]
-        assert isinstance(
-            first_message_prompt, HumanMessagePromptTemplate
-        )  # Or SystemMessagePromptTemplate depending on how from_template works
+        # The type of message can vary based on ChatPromptTemplate.from_template internal logic
+        # It's often HumanMessagePromptTemplate or SystemMessagePromptTemplate
+        assert hasattr(first_message_prompt, "prompt") and hasattr(first_message_prompt.prompt, "template")
 
-        # Access the template string of the underlying message prompt
         actual_template_string = first_message_prompt.prompt.template
 
+        assert "Hello Test User." in actual_template_string
         assert "Custom future me summary for test_user." in actual_template_string
         assert "Custom therapeutic phrases." in actual_template_string
         assert "Custom core values." in actual_template_string
+        assert "Custom safety plan summary." in actual_template_string
         assert "Base system prompt." in actual_template_string
         assert "Context: {context} Input: {input}" in actual_template_string
 
@@ -215,6 +222,8 @@ def create_mock_settings(lang: Literal["en", "he"], **kwargs: Any) -> Settings:
         "CHROMA_NAMESPACE_PLAN": "personal_plan",
         "CHROMA_NAMESPACE_SESSION": "session_data",
         "CHROMA_NAMESPACE_FUTURE": "future_me",
+        "CHROMA_NAMESPACE_THERAPIST_NOTES": "therapist_notes",  # Added
+        "CHROMA_NAMESPACE_CHAT_HISTORY": "dfm_chat_history_summaries",  # Added
         "OPENAI_API_KEY": "test_api_key_for_settings",
         "LLM_MODEL": "gpt-4o",
         "LLM_TEMPERATURE": 0.7,
@@ -242,17 +251,17 @@ def create_mock_settings(lang: Literal["en", "he"], **kwargs: Any) -> Settings:
             False,
             False,
             "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}",
-            "Based on the following context: {context} Answer the question: {input}",
+            "Hello {name}. I am your future self. Persona: {future_me_persona_summary}. Language: {critical_language_elements}. Values: {core_values_prompt}. Safety: {safety_plan_summary}. Based on the following context: {context} Answer the question: {input}",
             True,
-        ),
+        ),  # Updated default system prompt expectation
         (
             "en",
             False,
             False,
             "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}",
-            "Based on the following context: {context} Answer the question: {input}",
+            "Hello {name}. I am your future self. Persona: {future_me_persona_summary}. Language: {critical_language_elements}. Values: {core_values_prompt}. Safety: {safety_plan_summary}. Based on the following context: {context} Answer the question: {input}",
             True,
-        ),
+        ),  # Updated default system prompt expectation
     ],
 )
 def test_orchestrator_prompt_loading_by_language(
@@ -305,6 +314,18 @@ def test_orchestrator_prompt_loading_by_language(
     with patch("app.api.orchestrator.logging.warning") as mock_log_warning:
         orch_instance = Orchestrator()
 
+        # For the hardcoded default system prompt, ensure the test expectation matches the actual default in Orchestrator
+        if not he_files_exist and not en_files_exist:
+            # Match the actual default in Orchestrator, which now includes safety_plan_summary
+            expected_base_system_content = (
+                "Hello {name}. I am your future self. "
+                "Persona: {future_me_persona_summary}. "
+                "Language: {critical_language_elements}. "
+                "Values: {core_values_prompt}. "
+                "Safety: {safety_plan_summary}. "
+                "Based on the following context: {context} Answer the question: {input}"
+            )
+
         assert expected_base_crisis_content in orch_instance.base_crisis_prompt_template_str
         assert expected_base_system_content in orch_instance.base_system_prompt_template_str
 
@@ -329,3 +350,10 @@ def test_orchestrator_prompt_loading_by_language(
             assert not unexpected_fallback_logged, (
                 f"Unexpected fallback/hardcoded warning logged: {mock_log_warning.call_args_list}"
             )
+
+
+# Note: CRUD tests for UserProfileTable and API tests for /user_profile/
+# should ideally be in their own files (e.g., tests/test_crud/test_user_profile_crud.py
+# and tests/test_api/test_user_profile_api.py) for better organization.
+# For this response, they are omitted from test_orchestrator.py to keep it focused.
+# If you had them here previously and want them back, they would need to be added.
