@@ -1,65 +1,166 @@
-# /home/dfront/code/dear_future_me/app/main.py
-import logging
+# app/main.py
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator  # Add this import
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi_users.exceptions import UserNotExists
 
-# Direct import of API routers from their specific modules
 from app.api.chat import router as chat_router
-from app.api.orchestrator import RagOrchestrator
+from app.api.rag import RagOrchestrator
 from app.api.rag import router as rag_router
-from app.api.user_profile import router as user_profile_router
-
-# Import all necessary auth routers directly
 from app.auth.router import (
+    UserManager,
     auth_router,
+    fastapi_users,
+    get_user_db,
     register_router,
-    reset_password_router,
-    users_router,
-    verify_router,
 )
-from app.core.settings import get_settings
+from app.auth.schemas import UserCreate, UserRead, UserUpdate
+from app.core.settings import Settings, get_settings  # Import Settings as well
+from app.db.init_db import init_db
+from app.db.migrate import upgrade_head
+from app.db.session import engine, get_async_session
 
-# Load configuration
-cfg = get_settings()
 
-
-# Lifespan for application startup and shutdown
+# Lifespan function now takes settings as an argument
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Initialize RagOrchestrator and store in app.state
-    logging.info("Application startup: Initializing RagOrchestrator...")
+async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None, None]:  # Add app_settings parameter
+    if app_settings.DEMO_MODE:  # Use app_settings
+        print("INFO: DEMO_MODE is active. Initializing database (dropping and recreating tables)...")
+        # await init_db()
+
+        # if app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+        # Only attempt to create demo user if DEMO_MODE is true AND auth is NOT skipped
+        if not app_settings.SKIP_AUTH and app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+            # Initialize DB only if we are actually going to create a user
+            await init_db()
+            print(f"INFO: DEMO_MODE - Attempting to set up demo user: {app_settings.DEMO_USER_EMAIL}")
+            try:
+                async for session in get_async_session():
+                    user_db_instance = None
+                    async for udb in get_user_db(session):
+                        user_db_instance = udb
+                        break
+                    if user_db_instance:
+                        user_manager_instance = UserManager(user_db_instance)
+                        try:
+                            await user_manager_instance.get_by_email(app_settings.DEMO_USER_EMAIL)
+                            # If get_by_email returns a user object, it means the user exists.
+                            # fastapi-users' get_by_email raises UserNotExists if not found.
+                            print(f"INFO: DEMO_MODE - Demo user '{app_settings.DEMO_USER_EMAIL}' already exists.")
+                        except UserNotExists:
+                            print(
+                                f"INFO: DEMO_MODE - Demo user '{app_settings.DEMO_USER_EMAIL}' not found. Creating..."
+                            )
+                            user_create_schema = UserCreate(
+                                email=app_settings.DEMO_USER_EMAIL,
+                                password=app_settings.DEMO_USER_PASSWORD,
+                                is_active=True,
+                            )
+                            await user_manager_instance.create(user_create_schema, safe=True)
+                            print(f"INFO: DEMO_MODE - Demo user '{app_settings.DEMO_USER_EMAIL}' created successfully.")
+
+                    else:
+                        print("ERROR: DEMO_MODE - Could not obtain UserDatabase instance to create demo user.")
+            except Exception as e:
+                # Catch any other exceptions during the setup process
+                print(f"ERROR: DEMO_MODE - An error occurred during demo user setup: {e}")
+                import traceback
+
+                traceback.print_exc()  # For more detailed error logging
+        elif app_settings.SKIP_AUTH:
+            print("INFO: DEMO_MODE is active, but SKIP_AUTH is true. Skipping demo user creation and DB init.")
+        else:
+            # This case might occur if DEMO_USER_EMAIL or DEMO_USER_PASSWORD are not set
+            print(
+                "INFO: DEMO_MODE is active, but demo user credentials are not fully set. Skipping demo user creation and DB init."
+            )
+
+            # traceback.print_exc()  # For more detailed error logging
+    else:
+        print("INFO: DEMO_MODE is false. Applying Alembic migrations if any...")
+        try:
+            upgrade_head()
+            print("INFO: Alembic migrations applied successfully (or already up-to-date).")
+        except Exception as exc:
+            print(f"ERROR: Alembic upgrade failed: {exc}")
+            raise RuntimeError(f"Alembic upgrade failed: {exc}") from exc
+
+    print("INFO: Initializing RagOrchestrator...")
+    # If RagOrchestrator needs settings, it should ideally get them internally
+    # or have them passed during instantiation if they can vary per app instance.
     app.state.rag_orchestrator = RagOrchestrator()
-    logging.info("RagOrchestrator initialized.")
+    print("INFO: RagOrchestrator initialized.")
+
     yield
-    # Shutdown: Clean up resources if any
-    logging.info("Application shutdown.")
-    if hasattr(app.state, "rag_orchestrator"):
-        del app.state.rag_orchestrator
+
+    print("INFO: Application shutting down. Disposing database engine...")
+    await engine.dispose()
+    print("INFO: Database engine disposed.")
 
 
-app = FastAPI(lifespan=lifespan, title="Dear Future Me API")
+def create_app() -> FastAPI:
+    # Fetch settings inside the factory, after env vars might have been patched
+    app_settings = get_settings()
 
-# Include auth routers
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(register_router, prefix="/auth", tags=["auth"])
-app.include_router(reset_password_router, prefix="/auth/forgot-password", tags=["auth"])
-app.include_router(verify_router, prefix="/auth/verify", tags=["auth"])
-app.include_router(users_router, prefix="/users", tags=["users"])
+    # Define lifespan_wrapper to pass settings
+    @asynccontextmanager
+    async def lifespan_wrapper(app_instance: FastAPI) -> AsyncGenerator[None, None]:
+        # Correctly enter the context of the main lifespan function
+        # The 'lifespan' function is an async context manager, so use 'async with'.
+        async with lifespan(app_instance, app_settings):
+            yield
+        # The cleanup part of 'lifespan' will execute when this 'async with' block exits.
 
-# Include other API routers
-app.include_router(chat_router, prefix="/chat", tags=["chat"])  # chat_router now has path "/text"
-app.include_router(rag_router, prefix="/rag", tags=["rag"])
-app.include_router(user_profile_router, prefix="/user_profile", tags=["user_profile"])
+    instance = FastAPI(title="Dear Future Me API", lifespan=lifespan_wrapper)
+
+    # It's generally safer if fastapi_users and current_active_user are also
+    # initialized within create_app if their behavior depends on settings
+    # that might change per app instance (e.g., for testing).
+    # For now, we assume the globally imported fastapi_users from router.py is sufficient.
+    # If SECRET_KEY or other auth-related settings were dynamic per test,
+    # the FastAPIUsers instance and its components (like JWTStrategy) would need
+    # to be created here, using the app_settings.
+    current_active_user = fastapi_users.current_user(active=True)
+
+    # Auth endpoints - Conditionally include registration router
+    if not app_settings.DEMO_MODE:  # Use app_settings
+        instance.include_router(register_router, prefix="/auth", tags=["auth"])
+        print("INFO: Standard mode - Registration router enabled.")
+    else:
+        print("INFO: DEMO_MODE is active - Registration router is disabled.")
+
+    instance.include_router(auth_router, prefix="/auth", tags=["auth"])
+    instance.include_router(
+        fastapi_users.get_users_router(UserRead, UserUpdate),
+        prefix="/users",
+        tags=["users"],
+    )
+
+    # # Chat endpoints - ALWAYS protected
+    # instance.include_router(chat_router, dependencies=[Depends(current_active_user)])
+    # or
+    # Chat endpoints - Conditionally protected
+    chat_dependencies = []
+    if not app_settings.SKIP_AUTH:
+        chat_dependencies.append(Depends(current_active_user))
+        # instance.include_router(chat_router, dependencies=chat_dependencies)  # TO DO
+
+        print("INFO: SKIP_AUTH is false. Chat endpoints are protected.")
+    else:
+        print("INFO: SKIP_AUTH is true. Chat endpoints are NOT protected (authentication bypassed).")
+    instance.include_router(chat_router, dependencies=chat_dependencies)
+
+    # RAG endpoints
+    instance.include_router(rag_router)
+
+    # Health check
+    @instance.get("/ping", tags=["health"])
+    async def ping() -> dict[str, str]:
+        return {"ping": "pong"}
+
+    return instance
 
 
-@app.get("/ping")
-async def ping():
-    """Sanity check."""
-    return {"ping": "pong"}  # Corrected from "pong!" to "pong"
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host=cfg.DFM_API_HOST, port=cfg.DFM_API_PORT)
+# Global app instance for Uvicorn, but tests will use create_app()
+app = create_app()

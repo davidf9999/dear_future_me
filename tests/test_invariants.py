@@ -1,64 +1,41 @@
 # tests/test_invariants.py
+"""
+Invariant checks that replace the old ad-hoc `check_*` helper scripts.
+"""
 
-# ─── Standard Library ───────────────────────────────────────────────────────
-from pathlib import Path
-
-# ─── Third-Party ────────────────────────────────────────────────────────────
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
+from fastapi.testclient import TestClient
 
-# ─── Local Application ──────────────────────────────────────────────────────
+from app.auth.router import get_jwt_strategy
 from app.core.settings import get_settings
-from app.db.session import (
-    AsyncSessionLocal,  # Corrected import: AsyncSessionLocal instead of AsyncSessionMaker
-)
+from app.db.session import AsyncSessionMaker  # engine was locally imported
+from app.db.session import engine, get_async_session
 
-# ────────────────────────────────────────────────────────────────────────────
-
-# Add the project root to the Python path
-# This is often handled by pytest configuration or running pytest from the root,
-# but can be added here for explicitness if needed.
-# current_dir = Path(__file__).parent
-# project_root = current_dir.parent
-# sys.path.insert(0, str(project_root))
+# from app.main import app
 
 
-# ─── Invariants ─────────────────────────────────────────────────────────────
-# These tests are designed to ensure that the application's basic invariants
-# are met. For example, that the database can be connected to, that the
-# settings are loaded correctly, etc.
+# ─────────────────────────  routing invariants  ─────────────────────────
+@pytest.mark.demo_mode(False)  # This test needs registration route present
+def test_auth_routes_present(client: TestClient):
+    assert client.post("/auth/login").status_code != 404
+    assert client.post("/auth/register").status_code != 404
 
 
+def test_jwt_strategy_secret_matches_settings():
+    strat = get_jwt_strategy()
+    assert strat.secret == get_settings().SECRET_KEY
+
+
+# ──────────────────────────  DB invariants  ────────────────────────────
 @pytest.mark.asyncio
-async def test_db_connection():
-    """Test that the database can be connected to."""
-    settings = get_settings()
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async with AsyncSessionLocal(bind=engine) as session:  # Use AsyncSessionLocal
-        assert session is not None, "Failed to create a database session."
-        # You could add a simple query here to further test the connection, e.g.:
-        # from sqlalchemy import text
-        # result = await session.execute(text("SELECT 1"))
-        # assert result.scalar_one() == 1, "Database query failed."
+async def test_singleton_engine():
+    # engine is now imported at the top
+    # async_sessionmaker stores constructor args in .kw
+    assert AsyncSessionMaker.kw.get("bind") is engine
 
-
-def test_settings_load():
-    """Test that the settings are loaded correctly."""
-    settings = get_settings()
-    assert settings is not None, "Failed to load settings."
-    assert settings.DATABASE_URL is not None, "DATABASE_URL not set in settings."
-    # Add more assertions for critical settings if needed
-
-
-def test_project_structure():
-    """Test that the project structure is as expected."""
-    # Example: Check for the existence of key directories
-    project_root = Path(__file__).parent.parent
-    assert (project_root / "app").is_dir(), "app directory not found."
-    assert (project_root / "app" / "api").is_dir(), "app/api directory not found."
-    assert (project_root / "app" / "db").is_dir(), "app/db directory not found."
-    assert (project_root / "templates").is_dir(), "templates directory not found."
-
-
-# Add more invariant tests as needed for your application.
-# For example, checking environment variables, external service reachability (mocked), etc.
+    # Two sessions pulled from dependency share the same engine
+    async for s1 in get_async_session():
+        async for s2 in get_async_session():
+            assert s1.bind is s2.bind is engine
+            break
+        break

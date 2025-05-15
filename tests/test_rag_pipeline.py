@@ -151,7 +151,6 @@ def test_chat_rag_endpoint(client_rag_pipeline: TestClient, monkeypatch):  # Use
     headers = {"Authorization": f"Bearer {token}"}
 
     # 3. Call the chat endpoint with the token
-    # The endpoint path is now /chat/text due to router prefix and endpoint path
     res = client_rag_pipeline.post("/chat/text", headers=headers, json={"message": "hi there"})
     assert res.status_code == 200
     assert res.json()["reply"] == "Echo: hi there"

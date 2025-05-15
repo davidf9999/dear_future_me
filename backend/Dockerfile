@@ -11,18 +11,10 @@ COPY ./backend/requirements.txt /code/requirements.txt
 RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
-# Copy application code and templates
+# Copy application code
+# Ensure ownership is set to the new user
 COPY ./app /code/app
-COPY ./templates /code/templates
-
-# Create a dedicated writable directory for data as root
-# This ensures the directory structure exists before changing ownership
-RUN mkdir -p /data_vol/prod
-
-# Now, change ownership of the application code directory (/code)
-# and the dedicated data directory (/data_vol) to appuser
 RUN chown -R appuser:appgroup /code
-RUN chown -R appuser:appgroup /data_vol
 
 # Switch to non-root user
 USER appuser

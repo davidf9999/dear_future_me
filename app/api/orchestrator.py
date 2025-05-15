@@ -1,68 +1,43 @@
-# app/api/orchestrator.py
 import logging
 import os
-import uuid  # Import uuid
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, cast
 
 from fastapi import Request
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
-from langchain_core.runnables import Runnable, RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
-from app.crud.user_profile import get_user_profile
-from app.db.models import UserProfileTable
 from app.rag.processor import DocumentProcessor
 
 # Initialize settings once
 cfg = get_settings()
 
 
-async def get_user_prompt_components_from_db(user_id: str, db_session: AsyncSession) -> Optional[UserProfileTable]:
-    """Fetches the user profile from the database."""
-    logging.info(f"Fetching user profile for user_id: {user_id}")
-    user_profile = await get_user_profile(db_session, user_id=uuid.UUID(user_id))
-    if not user_profile:
-        logging.warning(f"No profile found for user_id: {user_id}")
-    return user_profile
-
-
 class BranchingChain:
-    def __init__(self, risk_detector, crisis_chain_builder, rag_chain_builder, llm):
+    def __init__(self, risk_detector, crisis_chain, rag_chain):
         self.risk_detector = risk_detector
-        self.crisis_chain_builder = crisis_chain_builder
-        self.rag_chain_builder = rag_chain_builder
-        self.llm = llm
+        self.crisis_chain = crisis_chain
+        self.rag_chain = rag_chain
 
     async def ainvoke(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        query = inputs.get("query", "")
-        user_specific_system_prompt_template_str = inputs.get("user_system_prompt_str")
-        user_specific_crisis_prompt_template_str = inputs.get("user_crisis_prompt_str")
-        retriever = inputs.get("retriever")
-
-        if not user_specific_system_prompt_template_str or not user_specific_crisis_prompt_template_str:
-            logging.error("User-specific prompt strings not provided to BranchingChain")
-            return {"reply_content": "Error: System configuration issue."}
-
-        system_prompt = ChatPromptTemplate.from_template(user_specific_system_prompt_template_str)
-        crisis_prompt = ChatPromptTemplate.from_template(user_specific_crisis_prompt_template_str)
-
+        query = inputs.get("query", "")  # Assuming 'query' is the key for user message
         if self.risk_detector(query):
-            crisis_chain = self.crisis_chain_builder(crisis_prompt, self.llm)
-            return await crisis_chain.ainvoke({"query": query, "context": []})
+            # Crisis chain might expect 'query'
+            return await self.crisis_chain.ainvoke({"query": query, "context": []})  # Provide empty context if needed
         else:
-            rag_chain = self.rag_chain_builder(system_prompt, self.llm, retriever)
-            return await rag_chain.ainvoke({"input": query})
+            # RAG chain might expect 'input' or 'query' and 'context'
+            # Ensure inputs are correctly mapped
+            return await self.rag_chain.ainvoke({"input": query, "context": []})  # Provide empty context if needed
 
 
 class Orchestrator:
     def __init__(self):
-        self.settings = get_settings()
-        self._load_base_prompt_templates()
+        self.settings = get_settings()  # Each orchestrator instance gets fresh settings
+        self._load_prompts()
         self._load_risk_keywords()
 
         self.llm = ChatOpenAI(
@@ -70,299 +45,243 @@ class Orchestrator:
             temperature=self.settings.LLM_TEMPERATURE,
             api_key=self.settings.OPENAI_API_KEY,
         )
-        self.chain = BranchingChain(self._detect_risk, self._build_crisis_chain, self._build_rag_chain, self.llm)
+        # Initialize chains (can be overridden by mocks in tests)
+        self._crisis_chain = self._build_crisis_chain()
+        self._rag_chain = self._build_rag_chain()  # Placeholder, RagOrchestrator will build the real one
+        self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
-    async def get_user_specific_prompt_str(
-        self, base_template_str: str, user_id: Optional[str], db_session: Optional[AsyncSession]
-    ) -> str:
-        """Fetches user profile and injects components into the base template."""
-        if user_id and db_session:
-            try:
-                user_profile = await get_user_profile(db_session, user_id=uuid.UUID(user_id))
-                populated_template = base_template_str
-
-                placeholders = {
-                    "{name}": user_profile.name if user_profile else "friend",
-                    "{future_me_persona_summary}": user_profile.future_me_persona_summary
-                    if user_profile
-                    else "your supportive future self",
-                    "{critical_language_elements}": user_profile.key_therapeutic_language
-                    if user_profile
-                    else "terms that resonate with you",
-                    "{core_values_prompt}": user_profile.core_values_summary
-                    if user_profile
-                    else "your core strengths and values",
-                    "{safety_plan_summary}": user_profile.safety_plan_summary
-                    if user_profile
-                    else "your plan for staying safe",
-                }
-
-                for placeholder, value in placeholders.items():
-                    if value is not None and placeholder in populated_template:
-                        populated_template = populated_template.replace(placeholder, value)
-                    elif placeholder in populated_template:
-                        logging.warning(
-                            f"Value for placeholder {placeholder} is None. Placeholder not replaced with specific user data."
-                        )
-                return populated_template
-            except Exception as e:
-                logging.error(f"Error fetching or applying user prompt components for user {user_id}: {e}")
-                return base_template_str
-        return base_template_str
-
-    async def answer(
-        self, message: str, user_id: Optional[str] = None, db_session: Optional[AsyncSession] = None
-    ) -> Dict[str, Any]:
+    async def answer(self, message: str) -> Dict[str, Any]:
         try:
-            user_system_prompt_str = await self.get_user_specific_prompt_str(
-                self.base_system_prompt_template_str, user_id, db_session
-            )
-            user_crisis_prompt_str = await self.get_user_specific_prompt_str(
-                self.base_crisis_prompt_template_str, user_id, db_session
-            )
-
-            chain_input: Dict[str, Any] = {
-                "query": message,
-                "input": message,
-                "user_system_prompt_str": user_system_prompt_str,
-                "user_crisis_prompt_str": user_crisis_prompt_str,
-            }
-
-            if hasattr(self, "_get_combined_retriever") and callable(self._get_combined_retriever):
-                chain_input["retriever"] = self._get_combined_retriever()
-
-            result = await self.chain.ainvoke(chain_input)
-            reply_content = result.get("reply_content", "No specific reply found.")
+            # BranchingChain will route to the appropriate sub-chain
+            # Ensure the input dictionary keys match what BranchingChain expects
+            result = await self.chain.ainvoke({"query": message, "input": message})
+            # The output key might be 'answer' from RAG or 'result' from Crisis
+            reply_content = result.get("answer") or result.get("result", "No specific reply found.")
             return {"reply": cast(str, reply_content)}
         except RuntimeError as e:
-            logging.error(f"Runtime error during chain invocation: {e}")
+            logging.error(f"Error during chain invocation: {e}")
             return {"reply": "I’m sorry, I’m unable to answer that right now. Please try again later."}
-        except Exception as e:
+        except Exception as e:  # Catch any other unexpected errors
             logging.exception(f"Unexpected error in Orchestrator.answer: {e}")
             return {"reply": "An unexpected error occurred. Please try again."}
 
-    def _load_base_prompt_templates(self) -> None:
-        """Loads base system and crisis prompt templates from files."""
+    def _load_prompts(self) -> None:
+        """Loads system and crisis prompts based on APP_DEFAULT_LANGUAGE."""
         lang = self.settings.APP_DEFAULT_LANGUAGE
         template_dir = "templates"
 
+        # Try loading language-specific prompt, then generic, then default string
         try:
             crisis_prompt_path_lang = os.path.join(template_dir, f"crisis_prompt.{lang}.md")
             crisis_prompt_path_generic = os.path.join(template_dir, "crisis_prompt.md")
             if os.path.exists(crisis_prompt_path_lang):
                 with open(crisis_prompt_path_lang, "r", encoding="utf-8") as f:
-                    self.base_crisis_prompt_template_str = f.read()
+                    self.crisis_prompt_template_str = f.read()
             elif os.path.exists(crisis_prompt_path_generic):
                 with open(crisis_prompt_path_generic, "r", encoding="utf-8") as f:
-                    self.base_crisis_prompt_template_str = f.read()
+                    self.crisis_prompt_template_str = f.read()
                 logging.warning(
                     f"Crisis prompt for language '{lang}' not found. Falling back to generic 'crisis_prompt.md'."
                 )
             else:
-                self.base_crisis_prompt_template_str = "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}"
+                self.crisis_prompt_template_str = "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}"
                 logging.warning(
                     f"Neither '{crisis_prompt_path_lang}' nor '{crisis_prompt_path_generic}' found. Using hardcoded default crisis prompt."
                 )
         except Exception as e:
-            logging.error(f"Error loading base crisis prompt: {e}")
-            self.base_crisis_prompt_template_str = "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}"
+            logging.error(f"Error loading crisis prompt: {e}")
+            self.crisis_prompt_template_str = "You are a crisis responder. Respond with empathy and provide resources. Context: {context} Query: {query}"
 
         try:
             system_prompt_path_lang = os.path.join(template_dir, f"system_prompt.{lang}.md")
             system_prompt_path_generic = os.path.join(template_dir, "system_prompt.md")
             if os.path.exists(system_prompt_path_lang):
                 with open(system_prompt_path_lang, "r", encoding="utf-8") as f:
-                    self.base_system_prompt_template_str = f.read()
+                    self.system_prompt_template_str = f.read()
             elif os.path.exists(system_prompt_path_generic):
                 with open(system_prompt_path_generic, "r", encoding="utf-8") as f:
-                    self.base_system_prompt_template_str = f.read()
+                    self.system_prompt_template_str = f.read()
                 logging.warning(
                     f"System prompt for language '{lang}' not found. Falling back to generic 'system_prompt.md'."
                 )
             else:
-                self.base_system_prompt_template_str = (
-                    "Hello {name}. I am your future self. "
-                    "Persona: {future_me_persona_summary}. "
-                    "Language: {critical_language_elements}. "
-                    "Values: {core_values_prompt}. "
-                    "Safety: {safety_plan_summary}. "  # Added safety plan summary placeholder
+                self.system_prompt_template_str = (
                     "Based on the following context: {context} Answer the question: {input}"
                 )
                 logging.warning(
                     f"Neither '{system_prompt_path_lang}' nor '{system_prompt_path_generic}' found. Using hardcoded default system prompt."
                 )
         except Exception as e:
-            logging.error(f"Error loading base system prompt: {e}")
-            self.base_system_prompt_template_str = (  # Ensure default also has placeholders
-                "Hello {name}. I am your future self. "
-                "Persona: {future_me_persona_summary}. "
-                "Language: {critical_language_elements}. "
-                "Values: {core_values_prompt}. "
-                "Safety: {safety_plan_summary}. "
-                "Based on the following context: {context} Answer the question: {input}"
-            )
+            logging.error(f"Error loading system prompt: {e}")
+            self.system_prompt_template_str = "Based on the following context: {context} Answer the question: {input}"
+
+        # For type hinting and instantiation
+        self.crisis_prompt_template = ChatPromptTemplate.from_template(self.crisis_prompt_template_str)
+        self.system_prompt_template = ChatPromptTemplate.from_template(self.system_prompt_template_str)
 
     def _load_risk_keywords(self) -> None:
+        """Loads risk keywords based on language. For now, only English."""
+        # TODO: Implement language-specific keyword loading if needed
         if self.settings.APP_DEFAULT_LANGUAGE == "he":
+            # Placeholder for Hebrew keywords - for now, uses English as fallback
+            # self._risk_keywords = ["מילה1", "מילה2"] # Example Hebrew keywords
             logging.info("Hebrew language selected, but using English risk keywords as placeholder.")
             self._risk_keywords = ["die", "kill myself", "suicide", "hopeless", "end it all"]
-        else:
+        else:  # Default to English
             self._risk_keywords = ["die", "kill myself", "suicide", "hopeless", "end it all"]
 
     def _detect_risk(self, query: str) -> bool:
-        if not query:
+        """Simple keyword-based risk detection."""
+        if not query:  # Handle empty query
             return False
         return any(keyword in query.lower() for keyword in self._risk_keywords)
 
-    @staticmethod
-    def _build_crisis_chain(prompt_template: ChatPromptTemplate, llm: ChatOpenAI) -> Runnable:
-        chain = (
+    def _build_crisis_chain(self):
+        # This is a simplified crisis chain.
+        # In a real scenario, it might involve RAG from a safety plan.
+        # For now, it just uses the prompt and LLM.
+        return (
             {
                 "query": RunnablePassthrough(),
                 "context": RunnableLambda(lambda x: []),
-            }
-            | prompt_template
-            | llm
+            }  # Pass query, provide empty context
+            | self.crisis_prompt_template
+            | self.llm
             | StrOutputParser()
         )
-        return RunnableLambda(lambda inputs_dict: {"reply_content": chain.invoke(inputs_dict)})
 
-    @staticmethod
-    def _build_rag_chain(
-        prompt_template: ChatPromptTemplate, llm: ChatOpenAI, retriever: Optional[BaseRetriever]
-    ) -> Runnable:
-        logging.debug("Using placeholder _build_rag_chain from Orchestrator base class.")
-        chain = (
+    def _build_rag_chain(self):
+        # This is a placeholder. The actual RAG chain is built in RagOrchestrator.
+        # This basic version is just to make Orchestrator instantiable.
+        # It won't actually retrieve documents.
+        def format_docs(docs: list[Document]) -> str:
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        return (
             {
-                "context": RunnableLambda(lambda x: "" if not retriever else "dummy_context_base"),
+                "context": RunnableLambda(lambda x: []),  # No actual retrieval
                 "input": RunnablePassthrough(),
             }
-            | prompt_template
-            | llm
+            | self.system_prompt_template
+            | self.llm
             | StrOutputParser()
         )
-        return RunnableLambda(lambda inputs_dict: {"reply_content": chain.invoke(inputs_dict)})
 
 
 class RagOrchestrator(Orchestrator):
     def __init__(self):
         super().__init__()
+        # Initialize DocumentProcessors for each namespace
         self.theory_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_THEORY)
         self.plan_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_PLAN)
         self.session_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_SESSION)
         self.future_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_FUTURE)
-        self.therapist_notes_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_THERAPIST_NOTES)
-        self.chat_history_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_CHAT_HISTORY)
 
-        self.chain = BranchingChain(self._detect_risk, self._build_crisis_chain, self._build_actual_rag_chain, self.llm)
+        # Override the _rag_chain from the parent Orchestrator
+        self._rag_chain = self._build_actual_rag_chain()
+        # Re-initialize the main chain with the new _rag_chain
+        self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
+        # Summarization chain
         self.summarize_prompt_template = ChatPromptTemplate.from_template(
-            "Summarize the following session data concisely: {input}"
+            "Summarize the following session data concisely: {input}"  # Using 'input' for consistency
         )
         self.summarize_chain = self.summarize_prompt_template | self.llm | StrOutputParser()
 
     def _get_combined_retriever(self) -> BaseRetriever:
-        """Combines retrievers from all relevant namespaces."""
-        from langchain.retrievers import MergerRetriever
+        # This is a conceptual example. LangChain's `CombinedRetriever`
+        # or a custom retriever would be needed for true multi-namespace search.
+        # For simplicity, we'll mock this behavior or use one retriever.
+        # For now, let's just use the 'future_me' retriever as a placeholder.
+        # In a real app, you'd combine retrievers from theory_db, plan_db, etc.
+        # from langchain.retrievers import MergerRetriever # Example
+        # lotr = MergerRetriever(retrievers=[self.theory_db.vectordb.as_retriever(), self.plan_db.vectordb.as_retriever()])
+        # return lotr
+        return self.future_db.vectordb.as_retriever()  # Placeholder
 
-        retrievers = [
-            self.theory_db.vectordb.as_retriever(search_kwargs={"k": 2}),
-            self.plan_db.vectordb.as_retriever(search_kwargs={"k": 2}),
-            self.session_db.vectordb.as_retriever(search_kwargs={"k": 2}),
-            self.future_db.vectordb.as_retriever(search_kwargs={"k": 2}),
-            self.therapist_notes_db.vectordb.as_retriever(search_kwargs={"k": 1}),
-            self.chat_history_db.vectordb.as_retriever(search_kwargs={"k": 1}),
-        ]
-        valid_retrievers = [r for r in retrievers if r is not None]
-        if not valid_retrievers:
-            logging.error("No valid retrievers found for MergerRetriever.")
-
-            class DummyRetriever(BaseRetriever):
-                def _get_relevant_documents(self, query: str, *, run_manager=None) -> List[Document]:  # type: ignore
-                    return []
-
-                async def _aget_relevant_documents(self, query: str, *, run_manager=None) -> List[Document]:  # type: ignore
-                    return []
-
-            return DummyRetriever()
-        return MergerRetriever(retrievers=valid_retrievers)
-
-    @staticmethod
-    def _build_actual_rag_chain(
-        prompt_template: ChatPromptTemplate, llm: ChatOpenAI, retriever: Optional[BaseRetriever]
-    ) -> Runnable:
-        if not retriever:
-            logging.warning("Retriever not provided to _build_actual_rag_chain. RAG will not function as intended.")
-            simple_chain = prompt_template | llm | StrOutputParser()
-            return RunnableLambda(
-                lambda inputs_dict: {
-                    "reply_content": simple_chain.invoke({"input": inputs_dict.get("input"), "context": ""})
-                }
-            )
+    def _build_actual_rag_chain(self):
+        retriever = self._get_combined_retriever()
 
         def format_docs(docs: list[Document]) -> str:
             return "\n\n".join(doc.page_content for doc in docs)
 
-        context_retriever_chain = RunnablePassthrough.assign(
-            context_docs=RunnableLambda(lambda x: x["input"]) | retriever,
-            original_input_message=RunnableLambda(lambda x: x["input"]),
+        rag_chain_from_docs = (
+            RunnablePassthrough.assign(context=(lambda x: format_docs(x["context"])))
+            | self.system_prompt_template
+            | self.llm
+            | StrOutputParser()
         )
 
-        llm_input_preparation_chain = RunnablePassthrough.assign(
-            input=RunnableLambda(lambda x: x["original_input_message"]),
-            context=RunnableLambda(lambda x: format_docs(x["context_docs"])),
+        rag_chain_with_source = RunnablePassthrough.assign(
+            answer=rag_chain_from_docs,
+            sources=lambda x: [doc.metadata.get("source", "unknown") for doc in x["context"]],
         )
-
-        answer_generation_chain = llm_input_preparation_chain | prompt_template | llm | StrOutputParser()
-
-        rag_chain_with_sources = RunnablePassthrough.assign(
-            answer=answer_generation_chain,
-            sources=RunnableLambda(lambda x: [doc.metadata.get("source", "unknown") for doc in x["context_docs"]]),
-        )
-
-        full_rag_pipeline = context_retriever_chain | rag_chain_with_sources
-
-        def final_adapter(user_input_dict: Dict) -> Dict:
-            rag_result = full_rag_pipeline.invoke(user_input_dict)
-            return {"reply_content": rag_result.get("answer"), "sources": rag_result.get("sources", [])}
-
-        return RunnableLambda(final_adapter)
+        # The main RAG chain that takes 'input' and retrieves 'context'
+        return {
+            # "context": retriever, "input": RunnablePassthrough()
+            # FIX: Extract the 'input' key from the incoming dictionary before passing to the retriever
+            # The incoming dictionary to this part of the chain is {"query": ..., "input": ...}
+            # We want to pass the value of "input" to the retriever.
+            "context": RunnableLambda(lambda x: x["input"])
+            | retriever,  # Pass only the 'input' string to the retriever
+            "input": RunnablePassthrough(),  # Pass the original 'input' string through
+        } | rag_chain_with_source
 
     async def summarize_session(self, session_id: str) -> str:
+        """
+        Summarizes a session. For now, it's a placeholder.
+        In a real app, this would fetch session data (e.g., from session_db or another source)
+        and pass it to the summarization chain.
+        """
+        # Placeholder: In a real app, retrieve actual session documents
+        # For example: docs = self.session_db.query(f"session_id:{session_id}", k=10)
+        # For now, just use the session_id as input to the summarize_chain
         logging.info(f"Summarizing session (placeholder): {session_id}")
         try:
-            response = await self.summarize_chain.ainvoke({"input": f"Data for session {session_id}..."})
-            summary = response
+            # Assuming the chain returns a dict with "output_text" or similar
+            response = await self.summarize_chain.ainvoke(
+                {"input": f"Data for session {session_id}..."}
+            )  # Pass as "input"
+            summary = response  # summarize_chain now directly returns string due to StrOutputParser
             return cast(str, summary)
         except Exception as e:
             logging.error(f"Error summarizing session {session_id}: {e}")
             return f"Summary for {session_id} (unavailable)"
 
     async def _summarize_docs_with_chain(self, docs: List[Document]) -> str:
+        """Helper to summarize a list of documents using the summarization chain."""
         if not docs:
             return "No documents provided for summarization."
+        # Concatenate document content or handle as appropriate for the chain
         combined_text = "\n\n".join([doc.page_content for doc in docs])
         logging.info(f"Summarizing combined text of {len(docs)} documents.")
         try:
-            response = await self.summarize_chain.ainvoke({"input": combined_text})
-            summary = response
+            # Assuming the chain returns a dict with "output_text" or similar
+            response = await self.summarize_chain.ainvoke({"input": combined_text})  # Pass as "input"
+            summary = response  # summarize_chain now directly returns string
             return cast(str, summary)
         except Exception as e:
             logging.error(f"Error in _summarize_docs_with_chain: {e}")
             return "Could not generate summary due to an internal error."
 
 
+# --- Helper for API Endpoints ---
 async def get_orchestrator(request: Request) -> Orchestrator:
-    if (
-        hasattr(request.app.state, "rag_orchestrator")
-        and request.app.state.rag_orchestrator is not None
-        and isinstance(request.app.state.rag_orchestrator, RagOrchestrator)
+    # This ensures that for each request, we use the app.state.rag_orchestrator
+    # which was initialized once at startup (lifespan event).
+    # If RagOrchestrator is needed, it should be the one in app.state.
+    # For now, assuming the base Orchestrator is sufficient or this will be refined.
+    if hasattr(request.app.state, "rag_orchestrator") and isinstance(
+        request.app.state.rag_orchestrator, RagOrchestrator
     ):
         return request.app.state.rag_orchestrator
-
-    if not hasattr(request.app.state, "rag_orchestrator") or request.app.state.rag_orchestrator is None:
-        logging.warning(
-            "RagOrchestrator not found or not initialized in app.state. Creating a new one (this might be unexpected outside of startup)."
-        )
-        request.app.state.rag_orchestrator = RagOrchestrator()
+    # Fallback or if only base Orchestrator is needed for some endpoints
+    # This part might need adjustment based on which orchestrator type is expected.
+    # If a simple Orchestrator is ever needed and not the RagOrchestrator singleton:
+    # return Orchestrator()
+    # For now, always return the singleton if it exists, assuming it's the primary one.
+    if not hasattr(request.app.state, "rag_orchestrator"):
+        # This case should ideally not happen if lifespan sets it up.
+        logging.error("RagOrchestrator not found in app.state. Creating a new one (unexpected).")
+        request.app.state.rag_orchestrator = RagOrchestrator()  # Fallback, but investigate if this happens
     return request.app.state.rag_orchestrator

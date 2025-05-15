@@ -1,4 +1,3 @@
-# /home/dfront/code/dear_future_me/app/api/chat.py
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,7 +26,7 @@ class ChatResponse(BaseModel):
 
 
 @router.post(
-    "/text",  # Corrected path from "/chat/text" to "/text"
+    "/chat/text",
     response_model=ChatResponse,
     status_code=status.HTTP_200_OK,
 )

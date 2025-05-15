@@ -1,21 +1,32 @@
-# /home/dfront/code/dear_future_me/app/db/session.py
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+# app/db/session.py
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.settings import get_settings
 
-settings = get_settings()
-DATABASE_URL = settings.DATABASE_URL
+# ────────────────────────────────────────────────────────────────
+#  Build ONE engine & sessionmaker when this module is imported
+# ────────────────────────────────────────────────────────────────
+_cfg = get_settings()
 
-# This is the single, authoritative Base for all SQLAlchemy models in the application.
-Base = declarative_base()
-print(f"DEBUG [app.db.session]: id(Base) at definition: {id(Base)}")
+engine = create_async_engine(
+    _cfg.DATABASE_URL,
+    echo=_cfg.DEBUG_SQL,
+    pool_pre_ping=True,  # keeps stale connections out
+    pool_recycle=1_800,  # 30 min; avoids idle-timeout kicks
+)
 
-# This engine is for the main application. Tests will use a separate engine.
-engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+AsyncSessionMaker = async_sessionmaker(
+    bind=engine,
+    expire_on_commit=False,
+)
 
 
-async def get_async_session() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency – hands out a short-lived AsyncSession
+    from the global connection-pool.
+    """
+    async with AsyncSessionMaker() as session:
         yield session

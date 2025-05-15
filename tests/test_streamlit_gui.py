@@ -1,4 +1,4 @@
-# # tests/test_streamlit_gui.py
+# # /home/dfront/code/dear_future_me/tests/test_streamlit_gui.py
 # import os
 # from typing import Literal
 # from unittest.mock import MagicMock # Removed 'patch' as we'll use monkeypatch more directly

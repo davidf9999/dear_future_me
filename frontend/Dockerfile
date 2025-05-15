@@ -14,8 +14,7 @@ RUN groupadd -r appgroup && \
 # Copy requirements first to leverage Docker cache
 # Make sure you have a requirements.txt in your frontend directory
 # for Streamlit and any other frontend-specific dependencies.
-COPY --chown=appuser:appgroup ./frontend/requirements.txt /app/requirements.txt
-
+COPY --chown=appuser:appgroup ./requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
@@ -29,4 +28,4 @@ EXPOSE 8501
 
 # Default command to run Streamlit.
 # This can be overridden by the 'command' in docker-compose.yml.
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false", "--logger.level=info"]
+CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]

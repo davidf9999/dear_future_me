@@ -1,23 +1,17 @@
-# /home/dfront/code/dear_future_me/app/auth/models.py
-from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
-from sqlalchemy.orm import relationship
-
-# Crucial: Import the shared Base from app.db.session
-from app.db.session import Base
-
-# from sqlalchemy import Column, String # Uncomment if you have custom fields
+# app/auth/models.py
+from fastapi_users.db import SQLAlchemyBaseUserTableUUID
+from sqlalchemy import Column, String
+from sqlalchemy.orm import DeclarativeBase
 
 
-print(f"DEBUG [app.auth.models]: id(Base) at import: {id(Base)}")
+class Base(DeclarativeBase):
+    """Base class for all ORM models."""
+
+    pass
 
 
-class UserTable(Base, SQLAlchemyBaseUserTableUUID):
-    __tablename__ = "user"  # Explicitly define tablename
+class UserTable(SQLAlchemyBaseUserTableUUID, Base):
+    """User table (inherits core FastAPI-Users columns)."""
 
-    # Relationship to UserProfileTable
-    profile = relationship(
-        "UserProfileTable",
-        back_populates="user",
-        uselist=False,  # One-to-one relationship
-        cascade="all, delete-orphan",
-    )
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
