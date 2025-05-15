@@ -12,7 +12,7 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app.auth.models import UserTable
+from app.auth.models import UserProfileTable, UserTable  # Import UserProfileTable
 from app.core.settings import get_settings  # Import get_settings for cache clearing
 from app.db.init_db import init_db
 from app.db.session import get_async_session
@@ -40,12 +40,15 @@ def _bootstrap_db() -> None:
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_users_table() -> AsyncGenerator[None, None]:  # scope="function" is default for pytest_asyncio.fixture
-    """Empty the users table between tests that might insert rows."""
+    """Empty the users and user profile tables between tests that might insert rows."""
     async for session in get_async_session():
+        # Clear UserProfileTable first due to foreign key constraint
+        await session.execute(text(f"DELETE FROM {UserProfileTable.__tablename__}"))  # Use tablename attribute
         await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
         await session.commit()
         break
-    yield
+    # No need to explicitly yield anything if it's just setup/teardown
+    # yield # Removed yield as it's not needed for teardown fixture
 
 
 @pytest.fixture
