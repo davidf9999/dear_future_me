@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = Field(validation_alias="DATABASE_URL")
     SECRET_KEY: str = Field(validation_alias="SECRET_KEY")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    RUN_ALEMBIC_ON_STARTUP: bool = Field(True, validation_alias="RUN_ALEMBIC_ON_STARTUP")  # New setting
 
     # ── Service Ports & Host ───────────────────────────────────
     # These will be overridden by .env.dev or .env.prod via run.sh

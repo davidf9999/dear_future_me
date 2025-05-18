@@ -32,26 +32,24 @@ from app.db.session import get_async_session
 @asynccontextmanager
 async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None, None]:
     if app_settings.DEMO_MODE:
+        # ... (demo mode logic remains the same) ...
         print(
             "INFO: DEMO_MODE is active. Initializing database (dropping and recreating tables directly from models)..."
         )
-        # In DEMO_MODE, we want a fresh DB from models, not migrations.
-        # A new engine is created here specifically for this demo mode setup.
         demo_engine = create_async_engine(app_settings.DATABASE_URL, echo=app_settings.DEBUG_SQL)
         async with demo_engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
-        await demo_engine.dispose()  # Dispose the temporary demo engine
+        await demo_engine.dispose()
         print("INFO: DEMO_MODE - Database dropped and recreated from models.")
 
         if not app_settings.SKIP_AUTH and app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
+            # ... (demo user creation logic remains the same) ...
             print(f"INFO: DEMO_MODE - Attempting to set up demo user: {app_settings.DEMO_USER_EMAIL}")
             try:
-                # Use a session from the global_engine for user management,
-                # as the app will use sessions from this engine via get_async_session.
-                async for session in get_async_session():  # This uses the global_engine via AsyncSessionMaker
+                async for session in get_async_session():
                     user_db_instance = None
-                    async for udb in get_user_db(session):  # get_user_db also uses a session from global_engine
+                    async for udb in get_user_db(session):
                         user_db_instance = udb
                         break
                     if user_db_instance:
@@ -72,7 +70,7 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
                             print(f"INFO: DEMO_MODE - Demo user '{app_settings.DEMO_USER_EMAIL}' created successfully.")
                     else:
                         print("ERROR: DEMO_MODE - Could not obtain UserDatabase instance to create demo user.")
-                    break  # Ensure we only use one session from the async generator
+                    break
             except Exception as e:
                 print(f"ERROR: DEMO_MODE - An error occurred during demo user setup: {e}")
                 import traceback
@@ -85,13 +83,18 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
                 "INFO: DEMO_MODE is active, but demo user credentials are not fully set. Skipping demo user creation."
             )
     else:  # NOT DEMO_MODE
-        print("INFO: DEMO_MODE is false. Applying Alembic migrations if any (during app startup)...")
-        try:
-            upgrade_head()
-            print("INFO: Alembic migrations applied successfully (or already up-to-date during app startup).")
-        except Exception as exc:
-            print(f"ERROR: Alembic upgrade failed during app startup: {exc}")
-            raise RuntimeError(f"Alembic upgrade failed during app startup: {exc}") from exc
+        if app_settings.RUN_ALEMBIC_ON_STARTUP:  # Check the new setting
+            print("INFO: RUN_ALEMBIC_ON_STARTUP is true. Applying Alembic migrations (during app startup)...")
+            try:
+                upgrade_head()
+                print("INFO: Alembic migrations applied successfully (or already up-to-date during app startup).")
+            except Exception as exc:
+                print(f"ERROR: Alembic upgrade failed during app startup: {exc}")
+                raise RuntimeError(f"Alembic upgrade failed during app startup: {exc}") from exc
+        else:
+            print(
+                "INFO: RUN_ALEMBIC_ON_STARTUP is false. Skipping Alembic migrations during app startup (expected for tests)."
+            )
 
     print("INFO: Initializing RagOrchestrator...")
     app.state.rag_orchestrator = RagOrchestrator()
@@ -100,16 +103,16 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
     yield
 
     print("INFO: Application shutting down. Disposing global database engine...")
-    await global_engine.dispose()  # Dispose the global engine
+    await global_engine.dispose()
     print("INFO: Global database engine disposed.")
 
 
+# ... (create_app and global app instance remain the same) ...
 def create_app() -> FastAPI:
-    app_settings = get_settings()
+    app_settings = get_settings()  # get_settings() will now load RUN_ALEMBIC_ON_STARTUP
 
     @asynccontextmanager
     async def lifespan_wrapper(app_instance: FastAPI) -> AsyncGenerator[None, None]:
-        # Imports for Base and create_async_engine are now at module level
         async with lifespan(app_instance, app_settings):
             yield
 
