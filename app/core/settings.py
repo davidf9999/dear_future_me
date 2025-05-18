@@ -43,10 +43,13 @@ class Settings(BaseSettings):
 
     # ── Chat settings ─────────────────────────────────────────
     MAX_MESSAGE_LENGTH: int = Field(1000)
-    ASR_TIMEOUT_SECONDS: float = 15.0
+    ASR_TIMEOUT_SECONDS: float = Field(15.0)
 
     # ── RAG Namespaces / vector store ─────────────────────────
-    CHROMA_DIR: str = Field(validation_alias="CHROMA_DB_PATH")
+    CHROMA_DIR: str = Field(
+        default="./.tmp_alembic_chroma_db",  # Added default value
+        validation_alias="CHROMA_DB_PATH",
+    )
     CHROMA_NAMESPACE_THEORY: str = "theory"
     CHROMA_NAMESPACE_PLAN: str = "personal_plan"
     CHROMA_NAMESPACE_SESSION: str = "session_data"
