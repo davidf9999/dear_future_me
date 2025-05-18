@@ -1,38 +1,37 @@
-# app/main.py
+# /home/dfront/code/dear_future_me/app/main.py
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI
-from fastapi_users.exceptions import UserNotExists
-from sqlalchemy.ext.asyncio import create_async_engine  # Added import
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.api.chat import router as chat_router
-from app.api.rag import RagOrchestrator
-from app.api.rag import router as rag_router
-from app.auth.models import Base  # Added import
-from app.auth.router import (
-    UserManager,
-    auth_router,
-    fastapi_users,
-    get_user_db,
-    register_router,
+from app.api.orchestrator import (
+    RagOrchestrator,  # Assuming RagOrchestrator is in app.api.orchestrator
 )
+
+# Corrected import paths for RAG components
+from app.api.rag import router as rag_router
+from app.auth.models import Base
+
+# Import necessary components from the consolidated router.py
+from app.auth.router import UserManager  # The UserManager class
+from app.auth.router import (
+    current_active_user,  # The dependency for current active user
+)
+from app.auth.router import fastapi_users  # The FastAPIUsers instance
+from app.auth.router import get_user_db  # Import get_user_db from here
+from app.auth.router import auth_router, register_router
+from app.auth.routers.profile_router import router as user_profile_router
 from app.auth.schemas import UserCreate, UserRead, UserUpdate
 from app.core.settings import Settings, get_settings
-
-# app.db.init_db is no longer used directly for table creation in lifespan
 from app.db.migrate import upgrade_head
-from app.db.session import (
-    engine as global_engine,  # Renamed to avoid clash with local engine
-)
-from app.db.session import get_async_session
+from app.db.session import get_async_session, global_engine
 
 
-# Lifespan function now takes settings as an argument
 @asynccontextmanager
 async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None, None]:
     if app_settings.DEMO_MODE:
-        # ... (demo mode logic remains the same) ...
         print(
             "INFO: DEMO_MODE is active. Initializing database (dropping and recreating tables directly from models)..."
         )
@@ -44,15 +43,19 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
         print("INFO: DEMO_MODE - Database dropped and recreated from models.")
 
         if not app_settings.SKIP_AUTH and app_settings.DEMO_USER_EMAIL and app_settings.DEMO_USER_PASSWORD:
-            # ... (demo user creation logic remains the same) ...
             print(f"INFO: DEMO_MODE - Attempting to set up demo user: {app_settings.DEMO_USER_EMAIL}")
             try:
+                # Import UserNotExists here as it's specific to this block's logic
+                from fastapi_users.exceptions import UserNotExists
+
                 async for session in get_async_session():
                     user_db_instance = None
+                    # get_user_db is now imported from app.auth.router
                     async for udb in get_user_db(session):
                         user_db_instance = udb
                         break
                     if user_db_instance:
+                        # UserManager is now imported from app.auth.router
                         user_manager_instance = UserManager(user_db_instance)
                         try:
                             await user_manager_instance.get_by_email(app_settings.DEMO_USER_EMAIL)
@@ -64,7 +67,9 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
                             user_create_schema = UserCreate(
                                 email=app_settings.DEMO_USER_EMAIL,
                                 password=app_settings.DEMO_USER_PASSWORD,
-                                is_active=True,
+                                is_active=True,  # Ensure these defaults are what you want
+                                is_superuser=False,
+                                is_verified=False,
                             )
                             await user_manager_instance.create(user_create_schema, safe=True)
                             print(f"INFO: DEMO_MODE - Demo user '{app_settings.DEMO_USER_EMAIL}' created successfully.")
@@ -83,10 +88,10 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
                 "INFO: DEMO_MODE is active, but demo user credentials are not fully set. Skipping demo user creation."
             )
     else:  # NOT DEMO_MODE
-        if app_settings.RUN_ALEMBIC_ON_STARTUP:  # Check the new setting
+        if app_settings.RUN_ALEMBIC_ON_STARTUP:
             print("INFO: RUN_ALEMBIC_ON_STARTUP is true. Applying Alembic migrations (during app startup)...")
             try:
-                upgrade_head()
+                await upgrade_head()
                 print("INFO: Alembic migrations applied successfully (or already up-to-date during app startup).")
             except Exception as exc:
                 print(f"ERROR: Alembic upgrade failed during app startup: {exc}")
@@ -97,6 +102,7 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
             )
 
     print("INFO: Initializing RagOrchestrator...")
+    # RagOrchestrator is now imported from app.api.orchestrator
     app.state.rag_orchestrator = RagOrchestrator()
     print("INFO: RagOrchestrator initialized.")
 
@@ -107,18 +113,20 @@ async def lifespan(app: FastAPI, app_settings: Settings) -> AsyncGenerator[None,
     print("INFO: Global database engine disposed.")
 
 
-# ... (create_app and global app instance remain the same) ...
 def create_app() -> FastAPI:
-    app_settings = get_settings()  # get_settings() will now load RUN_ALEMBIC_ON_STARTUP
+    app_settings = get_settings()
 
     @asynccontextmanager
     async def lifespan_wrapper(app_instance: FastAPI) -> AsyncGenerator[None, None]:
         async with lifespan(app_instance, app_settings):
             yield
 
-    instance = FastAPI(title="Dear Future Me API", lifespan=lifespan_wrapper)
+    instance = FastAPI(
+        title="Dear Future Me API",
+        lifespan=lifespan_wrapper,
+    )
 
-    current_active_user = fastapi_users.current_user(active=True)
+    # current_active_user is imported from app.auth.router
 
     if not app_settings.DEMO_MODE:
         instance.include_router(register_router, prefix="/auth", tags=["auth"])
@@ -127,11 +135,14 @@ def create_app() -> FastAPI:
         print("INFO: DEMO_MODE is active - Registration router is disabled.")
 
     instance.include_router(auth_router, prefix="/auth", tags=["auth"])
+    # Ensure UserRead and UserUpdate are imported for get_users_router
     instance.include_router(
         fastapi_users.get_users_router(UserRead, UserUpdate),
         prefix="/users",
         tags=["users"],
     )
+
+    instance.include_router(user_profile_router, tags=["User Profile"])
 
     chat_dependencies = []
     if not app_settings.SKIP_AUTH:
@@ -139,8 +150,10 @@ def create_app() -> FastAPI:
         print("INFO: SKIP_AUTH is false. Chat endpoints are protected.")
     else:
         print("INFO: SKIP_AUTH is true. Chat endpoints are NOT protected (authentication bypassed).")
+    # chat_router is imported from app.api.chat
     instance.include_router(chat_router, dependencies=chat_dependencies)
 
+    # rag_router is imported from app.api.rag
     instance.include_router(rag_router)
 
     @instance.get("/ping", tags=["health"])
