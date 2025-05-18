@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from app.auth.models import Base, SafetyPlanTable, UserProfileTable, UserTable
 from app.core.settings import Settings, get_settings  # Ensure Settings is imported
-from app.db.migrate import upgrade_head
+from app.db.migrate import upgrade_head  # This will now be an async function
 from app.db.session import AsyncSessionMaker, get_async_session
 
 # Import the factory function instead of the global app instance
@@ -52,22 +52,21 @@ async def _bootstrap_db(test_engine: AsyncEngine) -> None:
 
     print("INFO (_bootstrap_db): Attempting to create schema via Alembic migrations (upgrade_head)...")
     try:
-        upgrade_head()
+        await upgrade_head()  # Now awaiting the async version
         print("INFO (_bootstrap_db): Alembic migrations applied successfully.")
     except Exception as e_alembic:
         print(f"CRITICAL ERROR (_bootstrap_db): Alembic upgrade_head FAILED: {e_alembic}")
 
         # Attempt to check table status for debugging even on critical failure
-        async def check_table_existence(engine_conn, table_name_to_check):  # Renamed parameter
+        async def check_table_existence(engine_conn, table_name_to_check):
             def sync_check(conn_sync, name_sync):
                 inspector = inspect(conn_sync)
                 return inspector.has_table(name_sync)
 
-            return await engine_conn.run_sync(sync_check, table_name_to_check)  # Use renamed parameter
+            return await engine_conn.run_sync(sync_check, table_name_to_check)
 
         print("DEBUG (_bootstrap_db after Alembic CRITICAL error): Checking table existence...")
         async with test_engine.connect() as conn_check:
-            # Check specific tables known to be involved
             user_table_exists = await check_table_existence(conn_check, UserTable.__tablename__)
             user_profile_exists = await check_table_existence(conn_check, UserProfileTable.__tablename__)
             safety_plan_exists = await check_table_existence(conn_check, SafetyPlanTable.__tablename__)
@@ -82,7 +81,6 @@ async def _bootstrap_db(test_engine: AsyncEngine) -> None:
             )
         raise RuntimeError(f"Alembic migrations failed during test setup: {e_alembic}") from e_alembic
 
-    # Final check to confirm tables exist after successful Alembic run
     print("INFO (_bootstrap_db): Final check of table existence after successful Alembic run...")
     async with test_engine.connect() as conn_final_check:
         all_tables_in_metadata = Base.metadata.tables.keys()
@@ -90,9 +88,9 @@ async def _bootstrap_db(test_engine: AsyncEngine) -> None:
         for table_name_key in all_tables_in_metadata:
             table_obj = Base.metadata.tables[table_name_key]
 
-            def sync_check_final(conn_sync_final, name_sync_final):  # Renamed parameters
+            def sync_check_final(conn_sync_final, name_sync_final):
                 inspector = inspect(conn_sync_final)
-                return inspector.has_table(name_sync_final)  # Use renamed parameters
+                return inspector.has_table(name_sync_final)
 
             exists = await conn_final_check.run_sync(sync_check_final, table_obj.name)
             print(f"INFO (_bootstrap_db final check): Table '{table_obj.name}' exists: {exists}")
@@ -129,8 +127,6 @@ async def clear_tables_before_test(db_session: AsyncSession) -> None:
         try:
             await db_session.execute(text(f"DELETE FROM {table.__tablename__}"))
         except Exception as e:
-            # This might happen if _bootstrap_db failed and the table doesn't exist.
-            # The test will likely fail later anyway if the table is needed.
             print(
                 f"WARNING (clear_tables_before_test): Could not clear table {table.__tablename__}: {e}. It might not exist."
             )
@@ -158,8 +154,6 @@ def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test
     def mock_get_settings_for_client():
         s = Settings()
         s.DEMO_MODE = run_in_demo_mode
-        # Ensure RUN_ALEMBIC_ON_STARTUP is also controlled for tests if it's read by create_app
-        # It's already set to false by pytest.ini, but this makes the mock explicit.
         s.RUN_ALEMBIC_ON_STARTUP = False
         return s
 

@@ -1,72 +1,33 @@
-"""
-Alembic environment file
-
-*   Ensures the project root is on `sys.path` so `import app.…` works.
-*   Converts **async** URLs (e.g. `sqlite+aiosqlite`, `postgresql+asyncpg`)
-    to their synchronous counterparts before Alembic opens a connection.
-*   Binds Alembic’s `target_metadata` to the same SQLAlchemy models used
-    by the application (`app.auth.models.Base`).
-
-Run commands:
-
-    alembic revision --autogenerate -m "describe change"
-    alembic upgrade head
-    alembic stamp head     # baseline an existing schema
-"""
-
-import sys
+# /home/dfront/code/dear_future_me/app/db/migrations/env.py
+import asyncio
 from logging.config import fileConfig
-from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.engine import create_engine
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.future.engine import Engine
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# ── Add project root so "app." imports resolve ──────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # ../../..
-sys.path.append(str(PROJECT_ROOT))
+from app.auth.models import Base as AuthBase
 
-from app.auth.models import Base  # noqa: E402
-from app.core.settings import get_settings  # noqa: E402
-
-# ────────────────────────────────────────────────────────────────────────
-# Alembic config & metadata
-# ────────────────────────────────────────────────────────────────────────
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
 config = context.config
 
-if config.config_file_name:  # ← avoid Optional[str] issue
-    fileConfig(config.config_file_name)  # type: ignore[arg-type]
+# Interpret the config file for Python logging.
+# This line needs to be placed early in the script so that
+# Python logging is configured before any loggers are created.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata  # for autogenerate
+# add your model's MetaData object here
+# for 'autogenerate' support
 
-
-# ────────────────────────────────────────────────────────────────────────
-# Helpers
-# ────────────────────────────────────────────────────────────────────────
-def get_sync_url() -> str:
-    """
-    Return a **synchronous** SQLAlchemy URL suitable for Alembic’s
-    blocking engine, even if the runtime app uses an async driver.
-    """
-    raw = get_settings().DATABASE_URL
-    url = make_url(raw)
-
-    if url.drivername.endswith("+aiosqlite"):
-        url = url.set(drivername="sqlite")
-    elif url.drivername.endswith("+asyncpg"):
-        url = url.set(drivername="postgresql")
-    # add more driver swaps here if needed
-
-    return str(url)
+target_metadata = AuthBase.metadata
 
 
-# ────────────────────────────────────────────────────────────────────────
-# Offline migration (generate SQL)
-# ────────────────────────────────────────────────────────────────────────
 def run_migrations_offline() -> None:
-    url = get_sync_url()
+    """Run migrations in 'offline' mode."""
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -78,31 +39,35 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-# ────────────────────────────────────────────────────────────────────────
-# Online migration (connect & execute)
-# ────────────────────────────────────────────────────────────────────────
-def run_migrations_online() -> None:
-    connectable: Engine = create_engine(
-        get_sync_url(),
-        poolclass=pool.NullPool,
-        future=True,
+def do_run_migrations(connection: Connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        transaction_per_migration=False,  # Explicitly set for SQLite, helps with DDL visibility
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,  # detect column-type changes
-        )
-
-        with context.begin_transaction():
-            context.run_migrations()
+    with context.begin_transaction():  # This transaction is now per migration
+        context.run_migrations()
 
 
-# ────────────────────────────────────────────────────────────────────────
-# Entrypoint
-# ────────────────────────────────────────────────────────────────────────
+async def run_migrations_online() -> None:
+    """Run migrations in 'online' mode."""
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online()
+    # This will run in a separate thread when called via upgrade_head() from tests,
+    # so it's safe to create a new event loop here.
+    # For direct CLI `alembic upgrade head`, this is also the standard way.
+    asyncio.run(run_migrations_online())
