@@ -14,7 +14,7 @@ current_active_user = fastapi_users.current_user(active=True)
 
 
 @router.post(
-    "/me/safety-plan",
+    "",  # Path relative to the prefix in main.py (e.g., /me/safety-plan)
     response_model=SafetyPlanRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create Safety Plan",
@@ -36,7 +36,7 @@ async def create_safety_plan(
 
 
 @router.get(
-    "/me/safety-plan",
+    "",  # Path relative to the prefix in main.py (e.g., /me/safety-plan)
     response_model=SafetyPlanRead,
     summary="Get Safety Plan",
     description="Retrieve the safety plan for the authenticated user.",
@@ -45,8 +45,10 @@ async def get_safety_plan(
     user: UserTable = Depends(current_active_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # print(f"DEBUG: User ID in get_safety_plan: {user.id}") # Add debug print
     plan = await crud.get_safety_plan_by_user_id(db, user_id=user.id)
     if not plan:
+        # print("DEBUG: Plan not found, raising specific 404.") # Add debug print
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Safety plan not found for this user.",
@@ -55,7 +57,7 @@ async def get_safety_plan(
 
 
 @router.put(
-    "/me/safety-plan",
+    "",  # Path relative to the prefix in main.py (e.g., /me/safety-plan)
     response_model=SafetyPlanRead,
     summary="Update Safety Plan",
     description="Update the safety plan for the authenticated user.",

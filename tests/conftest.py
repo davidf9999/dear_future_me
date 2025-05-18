@@ -25,9 +25,10 @@ from sqlalchemy.orm import Session as SyncSession
 # Ensure all models are imported before Base.metadata is used by drop_all or migrations
 from app.auth.models import Base, SafetyPlanTable, UserProfileTable, UserTable
 from app.core.settings import Settings, get_settings
+from app.db import migrate as app_db_migrate  # Import the migrate module
 
 # Import AsyncSessionMaker class
-from app.db.session import get_async_session  # Ensure AsyncSessionMaker is imported
+from app.db.session import get_async_session
 
 # Import the factory function instead of the global app instance
 from app.main import create_app
@@ -59,9 +60,6 @@ def _prepare_test_db_file() -> None:
 
     print("INFO (_prepare_test_db_file): Running Alembic migrations synchronously to prepare test DB...")
     alembic_cfg = Config("alembic.ini")
-    # For synchronous Alembic run, ensure it uses a synchronous DB URL if env.py expects it.
-    # However, our env.py is designed to handle async URL for CLI mode by creating an async engine.
-    # So, passing the async URL should be fine.
     alembic_cfg.set_main_option("sqlalchemy.url", str(db_url))
 
     try:
@@ -76,7 +74,7 @@ def _prepare_test_db_file() -> None:
         sync_db_url_for_verify = db_url.replace("sqlite+aiosqlite:///", "sqlite:///")
         sync_engine_verify = create_sync_engine(sync_db_url_for_verify)
         try:
-            with SyncSession(sync_engine_verify) as _sync_session_verify:  # Use SyncSession, variable prefixed with _
+            with SyncSession(sync_engine_verify) as _sync_session_verify:
                 inspector = inspect(sync_engine_verify)
                 all_tables_in_metadata = Base.metadata.tables.keys()
                 all_exist = True
@@ -129,11 +127,7 @@ async def _bootstrap_db(test_engine: AsyncEngine, test_db_connection_scoped: Asy
     conn_for_check = test_db_connection_scoped
 
     print("INFO (_bootstrap_db): Verifying table existence using session-scoped connection...")
-    # Use begin_nested if already in transaction, else begin.
-    # The test_db_connection_scoped already yields a connection within a transaction.
-    # So, operations on conn_for_check are already within that transaction.
-    # A nested transaction is appropriate here for the verification block.
-    async with conn_for_check.begin_nested() as _verification_transaction:  # Variable prefixed with _
+    async with conn_for_check.begin_nested() as _verification_transaction:
         all_tables_in_metadata = Base.metadata.tables.keys()
         all_exist_and_accounted_for = True
         for table_name_key in all_tables_in_metadata:
@@ -148,40 +142,28 @@ async def _bootstrap_db(test_engine: AsyncEngine, test_db_connection_scoped: Asy
             if not exists:
                 all_exist_and_accounted_for = False
         if not all_exist_and_accounted_for:
-            # No need to explicitly rollback verification_transaction if error, outer will handle.
             print("CRITICAL ERROR (_bootstrap_db): Not all expected tables exist after Alembic migrations.")
             raise RuntimeError("Schema verification failed: Not all tables created by Alembic.")
         else:
             print("INFO (_bootstrap_db): All expected tables confirmed to exist.")
-            # No explicit commit for verification_transaction, it's part of the larger scope.
     print("INFO (_bootstrap_db): Test database schema verification completed.")
 
 
 @pytest_asyncio.fixture(scope="function")
 async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
-    """
-    Provides a SQLAlchemy AsyncSession for each test function, using the main test_engine.
-    Each test gets its own session and transaction.
-    """
-    async with test_engine.connect() as connection:  # New connection per test
-        async with connection.begin() as transaction:  # New transaction per test
-            # Create session bound to this specific connection
+    async with test_engine.connect() as connection:
+        async with connection.begin() as transaction:
             session = AsyncSession(bind=connection, expire_on_commit=False)
             print(
                 f"INFO (db_session): Created new session {session} for test on connection {connection} within transaction {transaction}."
             )
             yield session
             print(f"INFO (db_session): Rolling back transaction {transaction} for test session {session}.")
-            # Transaction is rolled back by the 'async with connection.begin()' context manager
     print("INFO (db_session): Connection for test session released.")
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_tables_before_test(db_session: AsyncSession) -> None:
-    """
-    Ensures relevant tables are empty before each test.
-    Uses the function-scoped session.
-    """
     _ = UserTable
     _ = UserProfileTable
     _ = SafetyPlanTable
@@ -189,22 +171,20 @@ async def clear_tables_before_test(db_session: AsyncSession) -> None:
     tables_to_clear = [SafetyPlanTable, UserProfileTable, UserTable]
     for table in tables_to_clear:
         try:
-            # The db_session.run_sync will provide the sync connection to the lambda
-            if await db_session.run_sync(lambda sync_conn: inspect(sync_conn).has_table(table.__tablename__)):
+            table_exists = await db_session.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table(table.__tablename__)
+            )
+            if table_exists:
                 await db_session.execute(text(f"DELETE FROM {table.__tablename__}"))
             else:
                 print(f"INFO (clear_tables_before_test): Table {table.__tablename__} does not exist, skipping delete.")
         except Exception as e:
             print(f"WARNING (clear_tables_before_test): Could not clear table {table.__tablename__}: {e}.")
-    await db_session.commit()  # Commit the DELETE operations
+    await db_session.commit()
 
 
 @pytest.fixture(scope="function")
 def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine) -> TestClient:
-    """
-    Provides a TestClient instance for FastAPI.
-    The dependency override for get_async_session will use the test_engine.
-    """
     marker = request.node.get_closest_marker("demo_mode")
     run_in_demo_mode = True
     if marker and marker.args and marker.args[0] is False:
@@ -222,12 +202,13 @@ def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test
 
     monkeypatch.setattr("app.main.get_settings", mock_get_settings_for_client)
     monkeypatch.setattr("app.core.settings.get_settings", mock_get_settings_for_client)
-    monkeypatch.setattr("app.db.migrate.get_settings", mock_get_settings_for_client)
+    # Use the imported app_db_migrate module alias here
+    if hasattr(app_db_migrate, "get_settings"):
+        monkeypatch.setattr("app.db.migrate.get_settings", mock_get_settings_for_client)
 
     test_app = create_app()
 
     async def override_get_async_session_for_client() -> AsyncGenerator[AsyncSession, None]:
-        # Each request gets a new connection and transaction from the engine
         async with test_engine.connect() as connection:
             async with connection.begin() as transaction:
                 session = AsyncSession(bind=connection, expire_on_commit=False)
