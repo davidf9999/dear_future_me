@@ -11,69 +11,143 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from app.auth.models import UserProfileTable, UserTable  # Import UserProfileTable
-from app.core.settings import get_settings  # Import get_settings for cache clearing
-from app.db.init_db import init_db
-from app.db.session import get_async_session
+from app.auth.models import Base, UserProfileTable, UserTable
+from app.core.settings import get_settings
+from app.db.migrate import upgrade_head
+from app.db.session import AsyncSessionMaker, get_async_session
 
 # Import the factory function instead of the global app instance
 from app.main import create_app
 
-# Environment variables for tests are now primarily set in pytest.ini
-# os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
-# os.environ.setdefault("SECRET_KEY", "test_secret_key_for_pytest")
-# os.environ.setdefault("OPENAI_API_KEY", "test_openai_api_key_for_pytest")
-# os.environ.setdefault("CHROMA_DB_PATH", "./data/test/chroma_db")
-# os.environ.setdefault("APP_DEFAULT_LANGUAGE", "en")
-# os.environ.setdefault("DEMO_USER_EMAIL", "pytest_demo@example.com") # Example if needed by settings
-# os.environ.setdefault("DEMO_USER_PASSWORD", "pytest_password")      # Example
+
+@pytest.fixture(scope="session")
+def event_loop(request):  # Renamed from event_loop_instance to event_loop to override pytest-asyncio's default
+    """Create an instance of the default event loop for each test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    loop.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _bootstrap_db() -> None:
-    """Create all tables once at session start (synchronous wrapper)."""
-    # If init_db relies on settings, ensure they are loaded correctly for this session scope
-    # For now, assuming init_db uses its own Settings() instance or a global one that's okay for setup.
-    asyncio.run(init_db())
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def clear_users_table() -> AsyncGenerator[None, None]:  # scope="function" is default for pytest_asyncio.fixture
-    """Empty the users and user profile tables between tests that might insert rows."""
-    async for session in get_async_session():
-        # Clear UserProfileTable first due to foreign key constraint
-        await session.execute(text(f"DELETE FROM {UserProfileTable.__tablename__}"))  # Use tablename attribute
-        await session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
-        await session.commit()
-        break
-    # No need to explicitly yield anything if it's just setup/teardown
-    # yield # Removed yield as it's not needed for teardown fixture
-
-
-@pytest.fixture
-def client(request, monkeypatch) -> TestClient:
+@pytest_asyncio.fixture(scope="session")
+async def test_engine(event_loop) -> AsyncGenerator[AsyncEngine, None]:  # Depends on session-scoped event_loop
     """
-    Provides a TestClient instance by calling the app factory.
-    Tests can mark themselves with @pytest.mark.demo_mode(False)
-    to run with DEMO_MODE=false. Defaults to DEMO_MODE=true for tests not marked.
+    Creates a single SQLAlchemy AsyncEngine for the entire test session.
+    This engine is used for all database interactions in tests to ensure consistency.
+    """
+    settings = get_settings()  # Load settings once to get DATABASE_URL
+    engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG_SQL)
+    print(f"INFO (test_engine): Created test engine for {settings.DATABASE_URL}")
+    yield engine
+    print("INFO (test_engine): Disposing test engine.")
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _bootstrap_db(test_engine: AsyncEngine, event_loop) -> None:  # Depends on session-scoped event_loop
+    """
+    Initializes the test database schema once at the start of the test session.
+    1. Drops all known SQLAlchemy tables using the test_engine.
+    2. Applies all Alembic migrations to create the current schema.
+    3. (Debug) Ensures tables are created via direct Base.metadata.create_all as a fallback.
+    """
+    print("INFO (_bootstrap_db): Dropping all tables using test_engine...")
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    print("INFO (_bootstrap_db): Applying Alembic migrations (upgrade_head)...")
+    try:
+        upgrade_head()
+        print("INFO (_bootstrap_db): Alembic migrations applied.")
+        # Fallback/Verification: Ensure tables are created if migrations didn't (e.g., empty DB)
+        print("INFO (_bootstrap_db): Attempting direct Base.metadata.create_all with test_engine...")
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("INFO (_bootstrap_db): Direct Base.metadata.create_all completed.")
+    except Exception as e:
+        print(f"ERROR (_bootstrap_db): Alembic upgrade_head or create_all failed: {e}")
+
+        # Check if tables exist even if upgrade_head or create_all had issues
+        async def table_exists_sync(engine_conn, table_name_sync):
+            from sqlalchemy import inspect  # Local import
+
+            inspector = inspect(engine_conn)
+            return inspector.has_table(table_name_sync)
+
+        async with test_engine.connect() as conn_check:
+            profile_exists = await conn_check.run_sync(table_exists_sync, UserProfileTable.__tablename__)
+            user_exists = await conn_check.run_sync(table_exists_sync, UserTable.__tablename__)
+        print(f"DEBUG (_bootstrap_db after error): Table '{UserProfileTable.__tablename__}' exists: {profile_exists}")
+        print(f"DEBUG (_bootstrap_db after error): Table '{UserTable.__tablename__}' exists: {user_exists}")
+        raise
+    print("INFO (_bootstrap_db): Test database schema initialized.")
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Provides a clean SQLAlchemy AsyncSession for each test function,
+    derived from the session-scoped test_engine.
+    """
+    TestScopedSessionMaker = AsyncSessionMaker.__class__(bind=test_engine, expire_on_commit=False)
+    async with TestScopedSessionMaker() as session:
+        yield session
+
+
+@pytest_asyncio.fixture(autouse=True)  # Runs for every test function
+async def clear_tables_before_test(db_session: AsyncSession) -> None:
+    """
+    Ensures UserProfileTable and UserTable are empty before each test.
+    Uses the function-scoped db_session.
+    """
+    try:
+        await db_session.execute(text(f"DELETE FROM {UserProfileTable.__tablename__}"))
+        await db_session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
+        await db_session.commit()
+    except Exception as e:
+        print(f"ERROR (clear_tables_before_test): Failed to clear tables: {e}")
+
+        async def table_exists(session_check, table_name_check):
+            try:
+                query = text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name_check}'")
+                result = await session_check.execute(query)
+                return result.scalar_one_or_none() is not None
+            except Exception as query_exc:
+                print(f"ERROR (clear_tables_before_test - table_exists check): {query_exc}")
+                return False
+
+        profile_exists = await table_exists(db_session, UserProfileTable.__tablename__)
+        user_exists = await table_exists(db_session, UserTable.__tablename__)
+        print(
+            f"DEBUG (clear_tables_before_test after error): Table '{UserProfileTable.__tablename__}' exists: {profile_exists}"
+        )
+        print(f"DEBUG (clear_tables_before_test after error): Table '{UserTable.__tablename__}' exists: {user_exists}")
+        raise
+
+
+@pytest.fixture(scope="function")
+def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine) -> TestClient:
+    """
+    Provides a TestClient instance for FastAPI, configured for testing.
+    - Handles DEMO_MODE based on test markers.
+    - Overrides the application's database session dependency to use the test_engine.
     """
     marker = request.node.get_closest_marker("demo_mode")
-    run_in_demo_mode = True  # Default for tests
-    if marker and marker.args[0] is False:
+    run_in_demo_mode = True
+    if marker and marker.args and marker.args[0] is False:
         run_in_demo_mode = False
 
-    if run_in_demo_mode:
-        monkeypatch.setenv("DEMO_MODE", "true")
-        print("INFO (test fixture): DEMO_MODE set to true for this test.")
-    else:
-        monkeypatch.setenv("DEMO_MODE", "false")
-        print("INFO (test fixture): DEMO_MODE set to false for this test.")
-
-    # Crucially, clear settings cache so it reloads with the new DEMO_MODE
-    # when create_app() calls get_settings()
+    monkeypatch.setenv("DEMO_MODE", "true" if run_in_demo_mode else "false")
     get_settings.cache_clear()
 
-    # Create a fresh app instance for this test
     test_app = create_app()
+
+    AppTestSessionMaker = AsyncSessionMaker.__class__(bind=test_engine, expire_on_commit=False)
+
+    async def override_get_async_session() -> AsyncGenerator[AsyncSession, None]:
+        async with AppTestSessionMaker() as session:
+            yield session
+
+    test_app.dependency_overrides[get_async_session] = override_get_async_session
     return TestClient(test_app)
