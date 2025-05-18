@@ -1,4 +1,4 @@
-# tests/conftest.py
+# /home/dfront/code/dear_future_me/tests/conftest.py
 # ruff: noqa: E402
 """
 Global test fixtures.
@@ -8,12 +8,12 @@ import asyncio
 from typing import AsyncGenerator
 
 import pytest
-import pytest_asyncio
+import pytest_asyncio  # For @pytest_asyncio.fixture
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from app.auth.models import Base, UserProfileTable, UserTable
+from app.auth.models import Base, SafetyPlanTable, UserProfileTable, UserTable
 from app.core.settings import get_settings
 from app.db.migrate import upgrade_head
 from app.db.session import AsyncSessionMaker, get_async_session
@@ -23,21 +23,22 @@ from app.main import create_app
 
 
 @pytest.fixture(scope="session")
-def event_loop(request):  # Renamed from event_loop_instance to event_loop to override pytest-asyncio's default
+def event_loop(request):  # This fixture overrides pytest-asyncio's default
     """Create an instance of the default event loop for each test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     asyncio.set_event_loop(loop)
     yield loop
     loop.close()
+    asyncio.set_event_loop(None)  # Clean up global state
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine(event_loop) -> AsyncGenerator[AsyncEngine, None]:  # Depends on session-scoped event_loop
+async def test_engine(event_loop) -> AsyncGenerator[AsyncEngine, None]:  # Depends on the session-scoped event_loop
     """
     Creates a single SQLAlchemy AsyncEngine for the entire test session.
-    This engine is used for all database interactions in tests to ensure consistency.
+    pytest-asyncio will ensure this runs on the provided session-scoped event loop.
     """
-    settings = get_settings()  # Load settings once to get DATABASE_URL
+    settings = get_settings()
     engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG_SQL)
     print(f"INFO (test_engine): Created test engine for {settings.DATABASE_URL}")
     yield engine
@@ -46,92 +47,102 @@ async def test_engine(event_loop) -> AsyncGenerator[AsyncEngine, None]:  # Depen
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
-async def _bootstrap_db(test_engine: AsyncEngine, event_loop) -> None:  # Depends on session-scoped event_loop
+async def _bootstrap_db(test_engine: AsyncEngine, event_loop) -> None:  # Depends on the session-scoped event_loop
     """
     Initializes the test database schema once at the start of the test session.
     1. Drops all known SQLAlchemy tables using the test_engine.
     2. Applies all Alembic migrations to create the current schema.
-    3. (Debug) Ensures tables are created via direct Base.metadata.create_all as a fallback.
     """
     print("INFO (_bootstrap_db): Dropping all tables using test_engine...")
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
     print("INFO (_bootstrap_db): Applying Alembic migrations (upgrade_head)...")
     try:
         upgrade_head()
-        print("INFO (_bootstrap_db): Alembic migrations applied.")
-        # Fallback/Verification: Ensure tables are created if migrations didn't (e.g., empty DB)
-        print("INFO (_bootstrap_db): Attempting direct Base.metadata.create_all with test_engine...")
-        async with test_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        print("INFO (_bootstrap_db): Direct Base.metadata.create_all completed.")
+        print("INFO (_bootstrap_db): Alembic migrations applied successfully.")
     except Exception as e:
-        print(f"ERROR (_bootstrap_db): Alembic upgrade_head or create_all failed: {e}")
+        print(f"ERROR (_bootstrap_db): Alembic upgrade_head FAILED: {e}")
 
-        # Check if tables exist even if upgrade_head or create_all had issues
-        async def table_exists_sync(engine_conn, table_name_sync):
-            from sqlalchemy import inspect  # Local import
+        # Debug check after potential failure
+        async def check_table_existence(engine_conn, table_name):
+            def sync_check(conn_sync, name_sync):
+                inspector = inspect(conn_sync)
+                return inspector.has_table(name_sync)
 
-            inspector = inspect(engine_conn)
-            return inspector.has_table(table_name_sync)
+            return await engine_conn.run_sync(sync_check, table_name)
 
         async with test_engine.connect() as conn_check:
-            profile_exists = await conn_check.run_sync(table_exists_sync, UserProfileTable.__tablename__)
-            user_exists = await conn_check.run_sync(table_exists_sync, UserTable.__tablename__)
-        print(f"DEBUG (_bootstrap_db after error): Table '{UserProfileTable.__tablename__}' exists: {profile_exists}")
-        print(f"DEBUG (_bootstrap_db after error): Table '{UserTable.__tablename__}' exists: {user_exists}")
-        raise
+            profile_exists = await check_table_existence(conn_check, UserProfileTable.__tablename__)
+            user_exists = await check_table_existence(conn_check, UserTable.__tablename__)
+            safety_exists = await check_table_existence(conn_check, SafetyPlanTable.__tablename__)
+        print(
+            f"DEBUG (_bootstrap_db after Alembic error): Table '{UserProfileTable.__tablename__}' exists: {profile_exists}"
+        )
+        print(f"DEBUG (_bootstrap_db after Alembic error): Table '{UserTable.__tablename__}' exists: {user_exists}")
+        print(
+            f"DEBUG (_bootstrap_db after Alembic error): Table '{SafetyPlanTable.__tablename__}' exists: {safety_exists}"
+        )
+
+        # As a fallback if Alembic fails, try creating tables directly.
+        print("INFO (_bootstrap_db): FALLBACK - Attempting direct Base.metadata.create_all due to Alembic error...")
+        try:
+            async with test_engine.begin() as conn_fallback:
+                await conn_fallback.run_sync(Base.metadata.create_all)
+            print("INFO (_bootstrap_db): FALLBACK - Direct Base.metadata.create_all completed.")
+        except Exception as create_all_e:
+            print(f"ERROR (_bootstrap_db): FALLBACK - Direct Base.metadata.create_all ALSO FAILED: {create_all_e}")
+            raise create_all_e
     print("INFO (_bootstrap_db): Test database schema initialized.")
 
 
 @pytest_asyncio.fixture(scope="function")
 async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     """
-    Provides a clean SQLAlchemy AsyncSession for each test function,
-    derived from the session-scoped test_engine.
+    Provides a SQLAlchemy AsyncSession for each test function.
     """
     TestScopedSessionMaker = AsyncSessionMaker.__class__(bind=test_engine, expire_on_commit=False)
     async with TestScopedSessionMaker() as session:
         yield session
 
 
-@pytest_asyncio.fixture(autouse=True)  # Runs for every test function
+@pytest_asyncio.fixture(autouse=True)
 async def clear_tables_before_test(db_session: AsyncSession) -> None:
     """
-    Ensures UserProfileTable and UserTable are empty before each test.
-    Uses the function-scoped db_session.
+    Ensures relevant tables are empty before each test.
     """
     try:
+        await db_session.execute(text(f"DELETE FROM {SafetyPlanTable.__tablename__}"))
         await db_session.execute(text(f"DELETE FROM {UserProfileTable.__tablename__}"))
         await db_session.execute(text(f"DELETE FROM {UserTable.__tablename__}"))
         await db_session.commit()
     except Exception as e:
         print(f"ERROR (clear_tables_before_test): Failed to clear tables: {e}")
 
-        async def table_exists(session_check, table_name_check):
+        async def check_table_existence_in_session(s, table_name):
             try:
-                query = text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name_check}'")
-                result = await session_check.execute(query)
-                return result.scalar_one_or_none() is not None
-            except Exception as query_exc:
-                print(f"ERROR (clear_tables_before_test - table_exists check): {query_exc}")
+                await s.execute(text(f"SELECT 1 FROM {table_name} LIMIT 0"))
+                return True
+            except Exception:
                 return False
 
-        profile_exists = await table_exists(db_session, UserProfileTable.__tablename__)
-        user_exists = await table_exists(db_session, UserTable.__tablename__)
+        profile_exists = await check_table_existence_in_session(db_session, UserProfileTable.__tablename__)
+        user_exists = await check_table_existence_in_session(db_session, UserTable.__tablename__)
+        safety_exists = await check_table_existence_in_session(db_session, SafetyPlanTable.__tablename__)
         print(
             f"DEBUG (clear_tables_before_test after error): Table '{UserProfileTable.__tablename__}' exists: {profile_exists}"
         )
         print(f"DEBUG (clear_tables_before_test after error): Table '{UserTable.__tablename__}' exists: {user_exists}")
+        print(
+            f"DEBUG (clear_tables_before_test after error): Table '{SafetyPlanTable.__tablename__}' exists: {safety_exists}"
+        )
         raise
 
 
 @pytest.fixture(scope="function")
 def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine) -> TestClient:
     """
-    Provides a TestClient instance for FastAPI, configured for testing.
-    - Handles DEMO_MODE based on test markers.
-    - Overrides the application's database session dependency to use the test_engine.
+    Provides a TestClient instance for FastAPI.
     """
     marker = request.node.get_closest_marker("demo_mode")
     run_in_demo_mode = True
