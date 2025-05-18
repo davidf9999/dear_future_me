@@ -171,6 +171,9 @@ async def clear_tables_before_test(db_session: AsyncSession) -> None:
     tables_to_clear = [SafetyPlanTable, UserProfileTable, UserTable]
     for table in tables_to_clear:
         try:
+            # The lambda function passed to run_sync receives the underlying
+            # synchronous SQLAlchemy Connection as its first argument.
+            # We then use this `sync_conn` with `inspect()`.
             table_exists = await db_session.run_sync(
                 lambda sync_conn: inspect(sync_conn).has_table(table.__tablename__)
             )
@@ -202,7 +205,6 @@ def client(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, test
 
     monkeypatch.setattr("app.main.get_settings", mock_get_settings_for_client)
     monkeypatch.setattr("app.core.settings.get_settings", mock_get_settings_for_client)
-    # Use the imported app_db_migrate module alias here
     if hasattr(app_db_migrate, "get_settings"):
         monkeypatch.setattr("app.db.migrate.get_settings", mock_get_settings_for_client)
 

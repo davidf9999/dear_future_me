@@ -13,9 +13,13 @@ from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router
 from app.api.user_profile_router import router as user_profile_router
 from app.auth.router import auth_router, register_router
+
+# from app.auth.schemas import UserCreate, UserRead, UserUpdate # Not directly used here
 from app.core.settings import Settings, get_settings
 from app.db.migrate import upgrade_head
-from app.db.session import engine as global_engine
+from app.db.session import (
+    engine as global_engine,  # get_async_session is used by TestClient override
+)
 from app.safety_plan.router import router as safety_plan_router
 
 # Initialize settings early if needed by other modules at import time
@@ -25,10 +29,10 @@ settings_instance = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
-    current_settings = get_settings()  # Get potentially updated settings
+    current_settings = get_settings()
     if current_settings.RUN_ALEMBIC_ON_STARTUP:
         logging.info("Running Alembic migrations on startup...")
-        await upgrade_head()  # Ensure this is awaited
+        await upgrade_head()
         logging.info("Alembic migrations completed.")
     else:
         logging.info("Skipping Alembic migrations on startup (RUN_ALEMBIC_ON_STARTUP=False).")
@@ -47,12 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Dear Future Me API",
         lifespan=lifespan,
-        # other app configurations
     )
 
-    # Ensure static and templates directories exist
-    # These paths are relative to where the application is run from (project root)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get project root (dear_future_me)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     static_dir = os.path.join(project_root, "static")
     templates_dir = os.path.join(project_root, "templates")
 
@@ -61,15 +62,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     os.makedirs(templates_dir, exist_ok=True)
     logging.info(f"Ensured templates directory exists: {templates_dir}")
 
-    # Mount static files
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=templates_dir)
 
     # Include routers
     app.include_router(auth_router, prefix="/auth", tags=["Auth"])
-    app.include_router(register_router, prefix="/auth", tags=["Auth"])
-    app.include_router(chat_router, prefix="/chat", tags=["Chat"])
-    app.include_router(rag_router, prefix="/rag", tags=["RAG"])
+    app.include_router(register_router, prefix="/auth", tags=["Auth"])  # fastapi-users register router
+
+    app.include_router(chat_router, prefix="/chat", tags=["Chat"])  # Ensure this is correct
+    app.include_router(rag_router, prefix="/rag", tags=["RAG"])  # Ensure this is correct
+
     app.include_router(user_profile_router, prefix="/me/profile", tags=["User Profile"])
     app.include_router(safety_plan_router, prefix="/me/safety-plan", tags=["Safety Plan"])
 
@@ -84,6 +86,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-# Create app instance for uvicorn if running this file directly
-# This is also what your test client will import if it imports `app` from `app.main`
 app = create_app()

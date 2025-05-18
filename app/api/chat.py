@@ -26,7 +26,7 @@ class ChatResponse(BaseModel):
 
 
 @router.post(
-    "/chat/text",
+    "/text",
     response_model=ChatResponse,
     status_code=status.HTTP_200_OK,
 )

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from app.api.orchestrator import RagOrchestrator, get_orchestrator
 from app.rag.processor import DocumentProcessor
 
-router = APIRouter(prefix="/rag", tags=["rag"])
+router = APIRouter(tags=["rag"])
 
 
 @router.post(
