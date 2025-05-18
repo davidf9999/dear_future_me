@@ -22,7 +22,8 @@ async def register_and_login_get_token(client: TestClient, email_suffix: str) ->
 
     # Login
     login_data = {"username": email, "password": password}
-    response = client.post("/auth/jwt/login", data=login_data)
+    # Corrected login URL from /auth/jwt/login to /auth/login
+    response = client.post("/auth/login", data=login_data)
     assert response.status_code == 200, f"Login failed: {response.text}"
     return response.json()["access_token"]
 

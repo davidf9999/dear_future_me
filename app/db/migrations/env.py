@@ -5,30 +5,23 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import (
+    Connection,  # Keep this for type hinting if used by do_run_migrations
+)
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.auth.models import Base as AuthBase
+from app.auth.models import Base
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line needs to be placed early in the script so that
-# Python logging is configured before any loggers are created.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-
-target_metadata = AuthBase.metadata
+target_metadata = Base.metadata
+print(f"DEBUG (env.py global scope): Base.metadata.tables: {list(Base.metadata.tables.keys())}")
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
-    # In offline mode, we get the URL directly.
-    # This should be the resolved URL if alembic.ini uses interpolation
-    # and the necessary env var is set.
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -36,70 +29,74 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
 
-def do_run_migrations(connection: Connection) -> None:
+def do_run_migrations(connection_param: Connection) -> None:  # Renamed parameter
+    """Configures context and runs migrations using the provided connection."""
+    print(f"DEBUG (do_run_migrations): Received connection: {connection_param}")
+    print("DEBUG (do_run_migrations): Configuring Alembic context with this connection.")
     context.configure(
-        connection=connection,
+        connection=connection_param,
         target_metadata=target_metadata,
-        transaction_per_migration=False,  # Explicitly set for SQLite, helps with DDL visibility
+        transaction_per_migration=True,
     )
-
-    with context.begin_transaction():  # This transaction is now per migration
+    print("DEBUG (do_run_migrations): Starting transaction for migrations.")
+    with context.begin_transaction():
         context.run_migrations()
+    print("DEBUG (do_run_migrations): Migrations transaction finished.")
 
 
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    # Get the sqlalchemy.url. This will retrieve the value set programmatically
-    # by app.db.migrate._synchronous_upgrade_head when called from tests,
-    # or the value from alembic.ini (potentially interpolated) when run from CLI.
-    db_url = config.get_main_option("sqlalchemy.url")
+    # Try to get connection from Alembic's config attributes (set by conftest.py)
+    connectable = config.attributes.get("connection", None)
+    print(f"DEBUG (run_migrations_online): Connection from config.attributes: {connectable}")
 
-    if not db_url or db_url == "env:DATABASE_URL" or "%(DATABASE_URL)s" in db_url:
-        # If db_url is still a placeholder, try to resolve it from environment
-        # This is a fallback for direct CLI usage if alembic.ini placeholders weren't resolved
-        # by the Config object itself (which can happen depending on Alembic/ConfigParser versions)
-        resolved_env_url = os.getenv("DATABASE_URL")
-        if resolved_env_url:
-            db_url = resolved_env_url
-        else:
-            # If still not resolved, raise an error as we need a concrete URL.
-            raise ValueError(
-                f"Could not resolve a valid SQLAlchemy URL. "
-                f"Attempted to use '{db_url}' from Alembic config/env. "
-                "Ensure DATABASE_URL environment variable is set for CLI use, "
-                "or that it's correctly passed programmatically."
-            )
+    if connectable is None:
+        # Fallback for CLI: create engine from sqlalchemy.url
+        print("DEBUG (run_migrations_online): No connection in attributes. Creating new engine for CLI mode.")
+        db_url = config.get_main_option("sqlalchemy.url")
+        if not db_url or db_url == "env:DATABASE_URL" or "%(DATABASE_URL)s" in db_url:
+            resolved_env_url = os.getenv("DATABASE_URL")
+            if resolved_env_url:
+                db_url = resolved_env_url
+            else:
+                raise ValueError("Could not resolve DATABASE_URL for Alembic CLI mode.")
 
-    # Create a configuration dictionary specifically for async_engine_from_config
-    # using the resolved database URL.
-    engine_config_dict = {
-        "sqlalchemy.url": db_url,
-        # You can add other engine-specific options here if they are in your
-        # [alembic] section of alembic.ini and need to be passed, e.g.:
-        # "pool_pre_ping": config.get_main_option("pool_pre_ping", "True"),
-    }
-
-    connectable = async_engine_from_config(
-        engine_config_dict,  # Pass the dictionary with the resolved URL
-        prefix="sqlalchemy.",  # Standard prefix for SQLAlchemy options
-        poolclass=pool.NullPool,  # Standard for Alembic's online mode
-    )
-
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
+        engine = async_engine_from_config(
+            {"sqlalchemy.url": db_url},  # Pass config directly
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+        async with engine.connect() as connection:
+            print(f"DEBUG (run_migrations_online): Created new async connection: {connection}")
+            # For run_sync, do_run_migrations will implicitly receive the sync connection.
+            # No need to pass raw_dbapi_connection explicitly as an argument here.
+            await connection.run_sync(do_run_migrations)
+            # The `do_run_migrations` function expects one argument, `connection_param`,
+            # which `run_sync` provides as the underlying synchronous connection.
+        await engine.dispose()
+        print("DEBUG (run_migrations_online): Disposed newly created engine for CLI mode.")
+    else:
+        # Path for programmatic call from conftest.py
+        # `connectable` here is the underlying synchronous DBAPI connection
+        # passed via alembic_cfg.attributes['connection']
+        print(
+            f"DEBUG (run_migrations_online): Using pre-configured synchronous connection: {connectable}. Calling do_run_migrations directly."
+        )
+        do_run_migrations(connectable)
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    # This will run in a separate thread when called via upgrade_head() from tests,
-    # so it's safe to create a new event loop here.
-    # For direct CLI `alembic upgrade head`, this is also the standard way.
-    asyncio.run(run_migrations_online())
+    if config.attributes.get("connection", None) is None:  # Only run asyncio.run if not in programmatic test mode
+        asyncio.run(run_migrations_online())
+    else:
+        # If connection is in attributes, we're in programmatic test mode.
+        # alembic_command.upgrade (sync) is calling this script.
+        # The `else` block in `run_migrations_online` which calls `do_run_migrations(connectable)`
+        # will be executed.
+        pass

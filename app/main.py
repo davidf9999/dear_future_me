@@ -26,7 +26,8 @@ from app.auth.routers.profile_router import router as user_profile_router
 from app.auth.schemas import UserCreate, UserRead, UserUpdate
 from app.core.settings import Settings, get_settings
 from app.db.migrate import upgrade_head
-from app.db.session import get_async_session, global_engine
+from app.db.session import engine as global_engine
+from app.db.session import get_async_session
 
 
 @asynccontextmanager
