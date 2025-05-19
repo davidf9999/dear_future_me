@@ -1,79 +1,126 @@
-# app/core/settings.py
-"""
-Central settings – now using **Pydantic-v2 native** syntax.
+# /home/dfront/code/dear_future_me/app/core/settings.py
+import os
+from enum import Enum
+from typing import Optional
 
-Key changes
-───────────
-* Replaces old `class Config` with `model_config = ConfigDict(...)`.
-* Uses `Field(validation_alias=…)` instead of `env=` (future-proof for v3).
-* Adds `model_config["env_file"]`, so we keep .env loading.
-"""
-
-from functools import lru_cache
-from typing import Literal
-
-from pydantic import Field
+import chromadb.config  # Import for chromadb.config.Settings
+from pydantic import EmailStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class LogLevel(str, Enum):
+    CRITICAL = "CRITICAL"
+    ERROR = "ERROR"
+    WARNING = "WARNING"
+    INFO = "INFO"
+    DEBUG = "DEBUG"
+
+
 class Settings(BaseSettings):
-    # Pydantic-settings native config
+    # --- Core Application Settings ---
+    APP_NAME: str = "Dear Future Me"
+    APP_VERSION: str = "0.1.0"
+    DEBUG_MODE: bool = False
+    LOG_LEVEL: LogLevel = LogLevel.INFO
+    APP_DEFAULT_LANGUAGE: str = "en"
+
+    # --- Database Settings ---
+    DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
+    DEBUG_SQL: bool = False
+
+    # --- Authentication & Security ---
+    SECRET_KEY: str = "a_very_secret_key_that_should_be_changed"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    DEMO_MODE: bool = True
+    DEMO_USER_EMAIL: EmailStr = "demo@example.com"
+    DEMO_USER_PASSWORD: str = "demopassword"
+    RUN_ALEMBIC_ON_STARTUP: bool = True
+
+    # --- LLM & RAG Settings ---
+    OPENAI_API_KEY: Optional[str] = None
+    LLM_MODEL: str = "gpt-3.5-turbo"
+    LLM_TEMPERATURE: float = 0.7
+    MAX_MESSAGE_LENGTH: int = 1000
+    ASR_TIMEOUT_SECONDS: int = 60
+
+    # --- ChromaDB RAG Namespaces ---
+    CHROMA_NAMESPACE_THEORY: str = "theory"
+    CHROMA_NAMESPACE_PERSONAL_PLAN: str = "personal_plan"
+    CHROMA_NAMESPACE_SESSION_DATA: str = "session_data"
+    CHROMA_NAMESPACE_FUTURE_ME: str = "future_me"
+    CHROMA_NAMESPACE_THERAPIST_NOTES: str = "therapist_notes"
+    CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES: str = "dfm_chat_history_summaries"
+
+    CHROMA_DIR: str = "./chroma_data"
+    CHROMA_HOST: Optional[str] = None
+    CHROMA_PORT: Optional[int] = None
+
+    # --- File Paths ---
+    PROMPT_TEMPLATE_DIR: str = "templates"
+    CRISIS_PROMPT_FILE: str = "crisis_prompt.md"
+    SYSTEM_PROMPT_FILE: str = "system_prompt.md"
+
+    # --- API Ports ---
+    DFM_API_PORT: int = 8000
+    STREAMLIT_SERVER_PORT: int = 8501
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore",  # ignore unknown env vars
+        extra="ignore",
+        case_sensitive=False,
     )
 
-    # ── Core & Auth ────────────────────────────────────────────
-    DATABASE_URL: str = Field(validation_alias="DATABASE_URL")
-    SECRET_KEY: str = Field(validation_alias="SECRET_KEY")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60, validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES")
-    RUN_ALEMBIC_ON_STARTUP: bool = Field(True, validation_alias="RUN_ALEMBIC_ON_STARTUP")  # New setting
+    @property
+    def CHROMA_CLIENT_SETTINGS(self) -> chromadb.config.Settings:  # Return type hint
+        # Ensure CHROMA_DIR is absolute if it's relative for local file-based Chroma
+        # This logic assumes that if CHROMA_DIR is relative, it's relative to the project root
+        # where the .env file or main application script is typically located.
 
-    # ── Service Ports & Host ───────────────────────────────────
-    # These will be overridden by .env.dev or .env.prod via run.sh
-    DFM_API_HOST: str = Field("0.0.0.0", validation_alias="DFM_API_HOST")
-    DFM_API_PORT: int = Field(8000, validation_alias="DFM_API_PORT")  # Default for prod
-    STREAMLIT_SERVER_PORT: int = Field(8501, validation_alias="STREAMLIT_SERVER_PORT")  # Default for prod
+        # Default to local file-based Chroma if host/port are not set
+        chroma_dir_to_use = self.CHROMA_DIR
+        if not os.path.isabs(chroma_dir_to_use):
+            # Attempt to make it absolute from a sensible project root.
+            # This might need adjustment based on your project structure and how settings are loaded.
+            # A common pattern is to define a BASE_DIR at the top of your settings file.
+            # For now, let's assume it's relative to the current working directory if not absolute.
+            # This might be problematic if CWD changes.
+            # A more robust way is to define a project root path.
+            # For testing, tmp_path fixture often provides a good absolute path.
+            pass  # Keep as is, DocumentProcessor will use it.
 
-    # ── Flags ─────────────────────────────────────────────────
-    DEMO_MODE: bool = Field(False, validation_alias="DEMO_MODE")  # Server's DEMO_MODE, e.g., for DB reset
-    DEBUG_SQL: bool = Field(False, validation_alias="DEBUG_SQL")
-    SKIP_AUTH: bool = Field(False, validation_alias="SKIP_AUTH")
-    STREAMLIT_DEBUG: bool = Field(False, validation_alias="STREAMLIT_DEBUG")
-
-    # ── Chat settings ─────────────────────────────────────────
-    MAX_MESSAGE_LENGTH: int = Field(1000)
-    ASR_TIMEOUT_SECONDS: float = Field(15.0)
-
-    # ── RAG Namespaces / vector store ─────────────────────────
-    CHROMA_DIR: str = Field(
-        default="./.tmp_alembic_chroma_db",  # Added default value
-        validation_alias="CHROMA_DB_PATH",
-    )
-    CHROMA_NAMESPACE_THEORY: str = "theory"
-    CHROMA_NAMESPACE_PLAN: str = "personal_plan"
-    CHROMA_NAMESPACE_SESSION: str = "session_data"
-    CHROMA_NAMESPACE_FUTURE: str = "future_me"
-
-    # ── LLM settings ──────────────────────────────────────────
-    OPENAI_API_KEY: str = Field(validation_alias="OPENAI_API_KEY")
-    LLM_MODEL: str = "gpt-4o"
-    LLM_TEMPERATURE: float = 0.7
-
-    # Demo user credentials (primarily for client tools like cli.py)
-    DEMO_USER_EMAIL: str = Field(validation_alias="DEMO_USER_EMAIL")
-    DEMO_USER_PASSWORD: str = Field(validation_alias="DEMO_USER_PASSWORD")
-
-    # ── Language Settings ─────────────────────────────────────
-    APP_DEFAULT_LANGUAGE: Literal["en", "he"] = Field("he", validation_alias="APP_DEFAULT_LANGUAGE")
+        if self.CHROMA_HOST and self.CHROMA_PORT:
+            return chromadb.config.Settings(
+                chroma_api_impl="chromadb.api.fastapi.FastAPI",  # Or HttpClient
+                chroma_server_host=self.CHROMA_HOST,
+                chroma_server_http_port=str(self.CHROMA_PORT),  # Port should be string for some clients
+                # Add other relevant settings for HttpClient if needed
+            )
+        else:
+            # For local, file-based Chroma
+            return chromadb.config.Settings(
+                is_persistent=True,  # Important for file-based
+                persist_directory=chroma_dir_to_use,
+            )
 
 
-@lru_cache(maxsize=1)
+_settings_instance: Optional[Settings] = None
+
+
 def get_settings() -> Settings:
-    """
-    ALWAYS call this helper instead of instantiating `Settings()` directly.
-    Tests rely on the .cache_clear() method, and production code benefits
-    from caching.
-    """
-    return Settings()  # type: ignore[call-arg]
+    global _settings_instance
+    if _settings_instance is None:
+        env_file_path = os.getenv("ENV_FILE", ".env")
+        if not os.path.exists(env_file_path) and env_file_path == ".env":
+            if os.path.exists(".env.example"):
+                env_file_path = ".env.example"
+                print(f"INFO: Default .env file not found. Using {env_file_path} as a fallback.")
+            else:
+                print("WARNING: Neither .env nor .env.example found. Using default settings values.")
+
+        current_model_config = Settings.model_config.copy()
+        current_model_config["env_file"] = env_file_path
+
+        _settings_instance = Settings(_model_config=current_model_config)
+    return _settings_instance

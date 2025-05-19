@@ -1,32 +1,44 @@
-# app/db/session.py
+# /home/dfront/code/dear_future_me/app/db/session.py
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.settings import get_settings
 
-# ────────────────────────────────────────────────────────────────
-#  Build ONE engine & sessionmaker when this module is imported
-# ────────────────────────────────────────────────────────────────
-_cfg = get_settings()
+settings = get_settings()
 
-engine = create_async_engine(
-    _cfg.DATABASE_URL,
-    echo=_cfg.DEBUG_SQL,
-    pool_pre_ping=True,  # keeps stale connections out
-    pool_recycle=1_800,  # 30 min; avoids idle-timeout kicks
-)
+engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG_SQL)
 
-AsyncSessionMaker = async_sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-)
+# expire_on_commit=False will prevent attributes from being expired
+# after commit.
+AsyncSessionMaker = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    FastAPI dependency – hands out a short-lived AsyncSession
-    from the global connection-pool.
-    """
     async with AsyncSessionMaker() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+@asynccontextmanager
+async def get_async_session_context() -> AsyncGenerator[AsyncSession, None]:
+    """Provide a transactional scope around a series of operations."""
+    async with AsyncSessionMaker() as session:
+        try:
+            yield session
+            # Note: We are not committing here by default.
+            # The caller of this context manager is responsible for session.commit()
+            # if changes made within the context need to be persisted.
+            # For read-only operations, this is fine.
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

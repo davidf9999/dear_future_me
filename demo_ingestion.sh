@@ -1,71 +1,111 @@
-#!/usr/bin/env bash
-# demo_ingestion.sh
-#
-# Re-ingests demo documents after wiping the existing demo collections.
-# Works for both local runs and docker-compose (web + chroma).
+#!/bin/bash
 
-set -euo pipefail
+# Script to ingest demo data into specified RAG namespaces.
+# Usage: ./demo_ingestion.sh <dev|prod>
 
-if [ -z "$1" ] || { [ "$1" != "prod" ] && [ "$1" != "dev" ]; }; then
-  echo "Usage: $0 <prod|dev>"
-  echo "Example: $0 dev   (to ingest demo data for the development environment)"
-  echo "         $0 prod  (to ingest demo data for the production environment)"
+set -e # Exit immediately if a command exits with a non-zero status.
+
+ENV_TYPE=$1
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PROJECT_ROOT=$(realpath "$SCRIPT_DIR") # Assumes script is in project root
+
+if [ -z "$ENV_TYPE" ]; then
+  echo "Usage: $0 <dev|prod>"
   exit 1
 fi
 
-ENV_TYPE=$1
-ENV_FILE=".env.$ENV_TYPE"
+ENV_FILE="$PROJECT_ROOT/.env.$ENV_TYPE"
 
 if [ ! -f "$ENV_FILE" ]; then
-    echo "ERROR: Environment file $ENV_FILE not found for environment '$ENV_TYPE'."
-    exit 1
+  echo "Error: Environment file $ENV_FILE not found."
+  exit 1
 fi
 
-# Load environment-specific variables (WEB_URL, CHROMA_DB_PATH)
-echo "Loading environment variables from $ENV_FILE..."
-set -o allexport
-# shellcheck disable=SC1090
-source "$ENV_FILE" # This will set DFM_API_URL and CHROMA_DB_PATH
-set +o allexport
+# Source environment variables to get DFM_API_PORT and CHROMA_DIR
+# Use a subshell to avoid polluting the current shell's environment
+(
+  set -a # Automatically export all variables
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
 
-# ——————————————————————————————————————————
-# Config
-# ——————————————————————————————————————————
-DEMO_NS=("theory" "personal_plan" "session_data" "future_me")
+  if [ -z "$DFM_API_PORT" ]; then
+    echo "Error: DFM_API_PORT not set in $ENV_FILE"
+    exit 1
+  fi
+  if [ -z "$CHROMA_DIR" ]; then
+    echo "Error: CHROMA_DIR not set in $ENV_FILE"
+    exit 1
+  fi
 
-echo "Target API ($ENV_TYPE) : $DFM_API_URL" # Use DFM_API_URL from sourced .env file
-echo "Chroma dir ($ENV_TYPE) : $CHROMA_DB_PATH" # Use CHROMA_DB_PATH from sourced .env file
-echo
+  API_BASE_URL="http://localhost:$DFM_API_PORT"
+  INGEST_URL="$API_BASE_URL/rag/ingest/"
 
-# ——————————————————————————————————————————
-# 1. Purge previous demo collections
-# ——————————————————————————————————————————
-for ns in "${DEMO_NS[@]}"; do
-  rm -rf "${CHROMA_DB_PATH}/${ns:?}"* 2>/dev/null || true # Consistently use CHROMA_DB_PATH and ensure ns is set
-done
-echo "🧹  Cleared old demo collections."
+  # Namespaces from settings (ensure these match your app.core.settings.py)
+  NAMESPACE_THEORY="theory"
+  NAMESPACE_FUTURE_ME="future_me"
+  # Add other namespaces as needed
+  # NAMESPACE_PERSONAL_PLAN="personal_plan"
+  # NAMESPACE_SESSION_DATA="session_data"
+  # NAMESPACE_THERAPIST_NOTES="therapist_notes"
+  # NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES="dfm_chat_history_summaries"
 
-# If you’re using the chroma Docker container with a *named* volume,
-# wipe via docker exec instead:
-# docker exec your_chroma_container rm -rf /data/*
 
-# ——————————————————————————————————————————
-# 2. Re-ingest demo docs
-# ——————————————————————————————————————————
-curl -sS -X POST "$DFM_API_URL/rag/ingest/" \
-  -F namespace=theory        -F doc_id=theory_demo  \
-  -F file=@demo_data/theory_excerpts.txt && echo
+  echo "Targeting API: $API_BASE_URL"
+  echo "Targeting Chroma Directory (for potential cleanup, though not directly used by curl): $CHROMA_DIR"
+  echo "---"
 
-curl -sS -X POST "$DFM_API_URL/rag/ingest/" \
-  -F namespace=personal_plan -F doc_id=plan_demo    \
-  -F file=@demo_data/personal_plan.txt && echo
+  # Optional: Clean up existing collections in ChromaDB if DocumentProcessor handles it,
+  # or if you have a separate cleanup mechanism.
+  # For now, this script focuses on ingestion.
+  # If DocumentProcessor creates collections if they don't exist, cleanup might not be needed here.
+  # echo "Note: Manual cleanup of $CHROMA_DIR/$NAMESPACE_THEORY, etc., might be needed if re-ingesting identical doc_ids."
 
-curl -sS -X POST "$DFM_API_URL/rag/ingest/" \
-  -F namespace=session_data  -F doc_id=session_demo \
-  -F file=@demo_data/session_notes.txt && echo
+  # --- Ingest Theory Data ---
+  echo "Ingesting into '$NAMESPACE_THEORY' namespace..."
+  THEORY_FILES_DIR="$PROJECT_ROOT/demo_data/theory"
+  if [ -d "$THEORY_FILES_DIR" ]; then
+    for file_path in "$THEORY_FILES_DIR"/*.txt; do
+      if [ -f "$file_path" ]; then
+        doc_id=$(basename "$file_path" .txt)
+        echo "  Ingesting $doc_id from $file_path..."
+        curl -X POST "$INGEST_URL" \
+          -H "Content-Type: multipart/form-data" \
+          -F "namespace=$NAMESPACE_THEORY" \
+          -F "doc_id=$doc_id" \
+          -F "text=$(cat "$file_path")" \
+          --silent --show-error --fail || echo "  Failed to ingest $doc_id"
+        echo "" # Newline for readability
+      fi
+    done
+  else
+    echo "Warning: Directory $THEORY_FILES_DIR not found. Skipping theory ingestion."
+  fi
+  echo "---"
 
-curl -sS -X POST "$DFM_API_URL/rag/ingest/" \
-  -F namespace=future_me     -F doc_id=future_demo  \
-  -F file=@demo_data/future_me_profile.txt && echo
+  # --- Ingest Future Me Data ---
+  echo "Ingesting into '$NAMESPACE_FUTURE_ME' namespace..."
+  FUTURE_ME_FILES_DIR="$PROJECT_ROOT/demo_data/future_me" # Assuming a similar structure
+  if [ -d "$FUTURE_ME_FILES_DIR" ]; then
+    for file_path in "$FUTURE_ME_FILES_DIR"/*.txt; do
+      if [ -f "$file_path" ]; then
+        doc_id=$(basename "$file_path" .txt) # Example: user1_future_narrative
+        echo "  Ingesting $doc_id from $file_path..."
+        curl -X POST "$INGEST_URL" \
+          -H "Content-Type: multipart/form-data" \
+          -F "namespace=$NAMESPACE_FUTURE_ME" \
+          -F "doc_id=$doc_id" \
+          -F "text=$(cat "$file_path")" \
+          --silent --show-error --fail || echo "  Failed to ingest $doc_id"
+        echo ""
+      fi
+    done
+  else
+    echo "Warning: Directory $FUTURE_ME_FILES_DIR not found. Skipping future_me ingestion."
+  fi
+  echo "---"
+  
+  # Add loops for other namespaces (personal_plan, session_data, etc.) as you create demo data for them.
 
-echo "✅  Demo documents ingested cleanly."
+  echo "Demo data ingestion process completed."
+)

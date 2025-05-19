@@ -4,7 +4,7 @@ DFM strategically manages user-specific data across relational database tables a
 
 ## 1. Relational Database Tables
 
-These tables store structured, user-specific information critical for immediate personalization, guiding the LLM's behavior, and supporting safety protocols. The system prompt template will incorporate the content of these tables for the arg user.
+These tables store structured, user-specific information critical for immediate personalization, guiding the LLM's behavior, and supporting safety protocols. The system prompt template will incorporate the content of these tables for the client user.
 
 ### `UserProfileTable`
 
