@@ -85,11 +85,17 @@ class Orchestrator:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         template_dir = os.path.join(base_dir, self.settings.PROMPT_TEMPLATE_DIR)
 
-        # Default prompts updated to use 'name', 'gender_identity_pronouns', 'emotion_regulation_strengths'
+        # Default crisis prompt now includes individual step_X placeholders
         default_crisis_prompt_str = (
             "You are a crisis responder. User query: {query}\n"
             "User Profile: Name: {name}, Pronouns: {gender_identity_pronouns}, Strengths: {emotion_regulation_strengths}.\n"
-            "Safety Plan Context: {context}"
+            "Safety Plan Details:\n"
+            "Warning Signs: {step_1_warning_signs}\n"
+            "Internal Coping Strategies: {step_2_internal_coping}\n"
+            "Social Distractions: {step_3_social_distractions}\n"
+            "Help Sources: {step_4_help_sources}\n"
+            "Professional Resources: {step_5_professional_resources}\n"
+            "Environment Risk Reduction: {step_6_environment_risk_reduction}"
         )
         default_system_prompt_str = (
             "Based on the following context: {context}\n\nUser Input: {input}\n\n"
@@ -148,7 +154,6 @@ class Orchestrator:
         return any(keyword in query.lower() for keyword in self._risk_keywords)
 
     async def _get_user_data_for_prompt(self, user: Optional[UserTable]) -> Dict[str, Any]:
-        # Initialize with correct keys expected by prompts
         user_data: Dict[str, Any] = {
             "name": "User",
             "user_profile_summary": "User profile not available.",
@@ -164,7 +169,13 @@ class Orchestrator:
             "therapist_language_to_mirror": "Therapist language to mirror not specified.",
             "user_emotional_tone_preference": "User emotional tone preference not specified.",
             "user_safety_plan_summary": "User safety plan summary not available.",
-            "safety_plan_context": "User safety plan details not available.",
+            # Placeholders for individual safety plan steps
+            "step_1_warning_signs": "Not specified.",
+            "step_2_internal_coping": "Not specified.",
+            "step_3_social_distractions": "Not specified.",
+            "step_4_help_sources": "Not specified.",
+            "step_5_professional_resources": "Not specified.",
+            "step_6_environment_risk_reduction": "Not specified.",
             "raw_safety_plan": None,
         }
 
@@ -172,7 +183,7 @@ class Orchestrator:
             try:
                 async with get_async_session_context() as db:
                     profile = await crud_profile.get_user_profile(db, user_id=user.id)
-                    if profile:  # Check if profile exists before accessing attributes
+                    if profile:
                         profile_parts = []
                         if profile.name:
                             profile_parts.append(f"Name: {profile.name}.")
@@ -180,8 +191,6 @@ class Orchestrator:
                             profile_parts.append(f"Persona Summary: {profile.future_me_persona_summary}.")
                             user_data["future_me_persona_summary"] = profile.future_me_persona_summary
 
-                        # Use getattr with default to safely access profile attributes
-                        # and directly assign to the keys expected by the prompts
                         user_data["name"] = getattr(profile, "name", None) or user_data["name"]
                         user_data["gender_identity_pronouns"] = (
                             getattr(profile, "gender_identity_pronouns", None) or user_data["gender_identity_pronouns"]
@@ -240,30 +249,19 @@ class Orchestrator:
                                 "User safety plan exists but has no summary details."
                             )
 
-                        context_parts = []
-                        if safety_plan.step_1_warning_signs:
-                            context_parts.append(f"- Warning Signs: {safety_plan.step_1_warning_signs}")
-                        if safety_plan.step_2_internal_coping:
-                            context_parts.append(f"- Internal Coping Strategies: {safety_plan.step_2_internal_coping}")
-                        if safety_plan.step_3_social_distractions:
-                            context_parts.append(
-                                f"- Social Contacts/Settings for Distraction: {safety_plan.step_3_social_distractions}"
-                            )
-                        if safety_plan.step_4_help_sources:
-                            context_parts.append(f"- People to Ask for Help: {safety_plan.step_4_help_sources}")
-                        if safety_plan.step_5_professional_resources:
-                            context_parts.append(
-                                f"- Professional Resources: {safety_plan.step_5_professional_resources}"
-                            )
-                        if safety_plan.step_6_environment_risk_reduction:
-                            context_parts.append(
-                                f"- Making Environment Safe: {safety_plan.step_6_environment_risk_reduction}"
-                            )
-
-                        if context_parts:
-                            user_data["safety_plan_context"] = "\n".join(context_parts)
-                        else:
-                            user_data["safety_plan_context"] = "User safety plan exists but has no detailed steps."
+                        # Populate individual step fields for the crisis prompt
+                        user_data["step_1_warning_signs"] = safety_plan.step_1_warning_signs or "Not specified."
+                        user_data["step_2_internal_coping"] = safety_plan.step_2_internal_coping or "Not specified."
+                        user_data["step_3_social_distractions"] = (
+                            safety_plan.step_3_social_distractions or "Not specified."
+                        )
+                        user_data["step_4_help_sources"] = safety_plan.step_4_help_sources or "Not specified."
+                        user_data["step_5_professional_resources"] = (
+                            safety_plan.step_5_professional_resources or "Not specified."
+                        )
+                        user_data["step_6_environment_risk_reduction"] = (
+                            safety_plan.step_6_environment_risk_reduction or "Not specified."
+                        )
             except Exception as e:
                 logging.error(f"Error fetching user data for user {user.id}: {e}")
         return user_data
@@ -273,8 +271,7 @@ class Orchestrator:
             user = input_dict.get("user")
             user_data_dict = await self._get_user_data_for_prompt(user)
 
-            # Crisis prompt expects: {query}, {name}, {gender_identity_pronouns}, {emotion_regulation_strengths}, {context}
-            # Ensure these keys exist in user_data_dict and are passed
+            # Crisis prompt now expects individual step_X fields
             return_dict = {
                 "query": input_dict.get("query", ""),
                 "name": user_data_dict.get("name", "User"),
@@ -282,7 +279,13 @@ class Orchestrator:
                 "emotion_regulation_strengths": user_data_dict.get(
                     "emotion_regulation_strengths", "Strengths not specified."
                 ),
-                "context": user_data_dict.get("safety_plan_context", "Safety plan details not available."),
+                # Pass individual safety plan steps
+                "step_1_warning_signs": user_data_dict.get("step_1_warning_signs"),
+                "step_2_internal_coping": user_data_dict.get("step_2_internal_coping"),
+                "step_3_social_distractions": user_data_dict.get("step_3_social_distractions"),
+                "step_4_help_sources": user_data_dict.get("step_4_help_sources"),
+                "step_5_professional_resources": user_data_dict.get("step_5_professional_resources"),
+                "step_6_environment_risk_reduction": user_data_dict.get("step_6_environment_risk_reduction"),
             }
             return return_dict
 
@@ -290,16 +293,12 @@ class Orchestrator:
 
     def _build_placeholder_rag_chain(self) -> Runnable:
         async def prepare_rag_input(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            # This function prepares input for the system prompt
-            # The system prompt expects many fields from user_data_dict
             user = input_dict.get("user")
             user_data_dict = await self._get_user_data_for_prompt(user)
-            # System prompt expects all keys from user_data_dict that are defined in the template
-            # e.g., name, gender_identity_pronouns, emotion_regulation_strengths, etc.
             return {
                 "input": input_dict.get("input", ""),
-                "context": "Placeholder context from base orchestrator.",
-                **user_data_dict,  # Pass all available user data
+                "context": "Placeholder context from base orchestrator.",  # This context is for RAG
+                **user_data_dict,
             }
 
         return RunnableLambda(prepare_rag_input) | self.system_prompt_template | self.llm | StrOutputParser()
@@ -345,8 +344,8 @@ class RagOrchestrator(Orchestrator):
 
             final_rag_input = {
                 "input": query,
-                "context": formatted_docs,
-                **user_data_dict,  # Pass all available user data
+                "context": formatted_docs,  # This context is for RAG
+                **user_data_dict,
             }
             return final_rag_input
 

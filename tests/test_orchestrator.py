@@ -79,7 +79,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         hashed_password="fake",
     )
 
-    # UserProfileTable now has emotion_regulation_strengths
     mock_profile_data = UserProfileTable(
         user_id=user_id,
         name="Test User",
@@ -92,6 +91,11 @@ async def test_orchestrator_includes_user_data_in_prompt(
         user_id=user_id,
         step_1_warning_signs="Feeling overwhelmed",
         step_2_internal_coping="Deep breathing exercises",
+        # Provide values for other steps for completeness in mock data
+        step_3_social_distractions="Call a friend",
+        step_4_help_sources="Family member",
+        step_5_professional_resources="Therapist number",
+        step_6_environment_risk_reduction="Go for a walk",
     )
 
     mock_get_user_profile = AsyncMock(return_value=mock_profile_data)
@@ -106,7 +110,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
 
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
 
-    # System prompt template expects 'name', 'gender_identity_pronouns', 'emotion_regulation_strengths'
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "--- User Data ---\n"
@@ -125,8 +128,13 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "Mirror: {therapist_language_to_mirror}\n"
         "Preference: {user_emotional_tone_preference}"
     )
-    # Crisis prompt template expects 'name', 'gender_identity_pronouns', 'emotion_regulation_strengths'
-    test_crisis_prompt_str = "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}. Safety Context: {context}"
+    # Crisis prompt template now expects individual step_X fields
+    test_crisis_prompt_str = (
+        "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}.\n"
+        "Warning Signs: {step_1_warning_signs}\nInternal Coping: {step_2_internal_coping}\n"
+        "Social Distractions: {step_3_social_distractions}\nHelp Sources: {step_4_help_sources}\n"
+        "Professional Resources: {step_5_professional_resources}\nEnvironment Risk Reduction: {step_6_environment_risk_reduction}"
+    )
 
     original_open = open
 
@@ -152,7 +160,7 @@ async def test_orchestrator_includes_user_data_in_prompt(
         patched_ainvoke.side_effect = side_effect_for_ainvoke
 
         orchestrator = RagOrchestrator()
-        await orchestrator.answer("Hello, how are you?", user=mock_user)
+        await orchestrator.answer("Hello, how are you?", user=mock_user)  # This triggers RAG path (system prompt)
 
     mock_get_user_profile.assert_called_once_with(db_session, user_id=user_id)
     mock_get_safety_plan.assert_called_once_with(db_session, user_id=user_id)
@@ -160,7 +168,7 @@ async def test_orchestrator_includes_user_data_in_prompt(
     assert patched_ainvoke.call_count > 0, "LLM ainvoke (patched) was not called"
     assert len(llm_call_args_list) > 0, "LLM call arguments were not captured by side_effect"
 
-    final_prompt_to_llm = llm_call_args_list[-1]
+    final_prompt_to_llm = llm_call_args_list[-1]  # System prompt
 
     prompt_string_content = ""
     if hasattr(final_prompt_to_llm, "to_string"):
@@ -177,7 +185,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
     assert "Name: Test User" in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
     assert "Emotion Regulation Strengths: Journaling, mindful breathing" in prompt_string_content
-    # Check the safety plan summary format (using step_X names)
     assert (
         "Safety Plan Summary: Warning Signs: Feeling overwhelmed. Internal Coping Strategies: Deep breathing exercises."
         in prompt_string_content
@@ -197,7 +204,6 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
         is_verified=True,
         is_superuser=False,
     )
-    # UserProfileTable now has emotion_regulation_strengths, name, gender_identity_pronouns
     mock_profile_data = UserProfileTable(
         user_id=user_id,
         name="Crisis User",
@@ -226,14 +232,19 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
 
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
 
-    # Crisis prompt template expects 'name', 'gender_identity_pronouns', 'emotion_regulation_strengths'
-    test_crisis_prompt_str_for_this_test = "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}. Safety Context: {context}"  # Explicitly define for this test
+    # Crisis prompt template now expects individual step_X fields
+    test_crisis_prompt_str_for_this_test = (
+        "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}.\n"
+        "Warning Signs: {step_1_warning_signs}\nInternal Coping: {step_2_internal_coping}\n"
+        "Social Distractions: {step_3_social_distractions}\nHelp Sources: {step_4_help_sources}\n"
+        "Professional Resources: {step_5_professional_resources}\nEnvironment Risk Reduction: {step_6_environment_risk_reduction}"
+    )
     original_open = open
 
     def mock_open_crisis_test(file_path, *args, **kwargs):
         if "crisis_prompt.md" in str(file_path):
             return mock_open(read_data=test_crisis_prompt_str_for_this_test)()
-        elif "system_prompt.md" in str(file_path):  # Allow system_prompt to be "loaded" too
+        elif "system_prompt.md" in str(file_path):
             return mock_open(
                 read_data="System prompt content {input} {context} {name} {gender_identity_pronouns} {emotion_regulation_strengths} {user_profile_summary} {future_me_persona_summary} {therapeutic_setting} {user_safety_plan_summary} {identified_values} {tone_alignment} {self_reported_goals} {recent_triggers_events} {primary_emotional_themes} {therapist_language_to_mirror} {user_emotional_tone_preference}"
             )()
@@ -254,7 +265,7 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
         patched_ainvoke.side_effect = side_effect_for_ainvoke
 
         orchestrator = RagOrchestrator()
-        await orchestrator.answer("I want to die", user=mock_user)
+        await orchestrator.answer("I want to die", user=mock_user)  # Triggers crisis path
 
     assert patched_ainvoke.call_count > 0, "LLM ainvoke (patched) was not called for crisis"
     assert len(llm_call_args_list) > 0, "LLM call arguments were not captured for crisis"
@@ -262,9 +273,13 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
     crisis_prompt_to_llm = llm_call_args_list[0]
     prompt_string_content = crisis_prompt_to_llm.to_string()
 
-    assert "user Crisis User" in prompt_string_content  # Check for user name (as {name})
+    assert "user Crisis User" in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
-    assert "Strengths: Resilience, Reaching out" in prompt_string_content  # Check for strengths
-    assert "Safety Context:" in prompt_string_content
-    assert "- Warning Signs: Feeling very down" in prompt_string_content
-    assert "- Internal Coping Strategies: Listen to music" in prompt_string_content
+    assert "Strengths: Resilience, Reaching out" in prompt_string_content
+    # Check for individual safety plan steps
+    assert "Warning Signs: Feeling very down" in prompt_string_content
+    assert "Internal Coping: Listen to music" in prompt_string_content
+    assert "Social Distractions: Call Sam" in prompt_string_content
+    assert "Help Sources: Therapist Dr. X" in prompt_string_content
+    assert "Professional Resources: Hotline Y" in prompt_string_content
+    assert "Environment Risk Reduction: Remove Z" in prompt_string_content
