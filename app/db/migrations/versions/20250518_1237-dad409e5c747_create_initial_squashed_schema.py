@@ -55,20 +55,24 @@ def upgrade() -> None:
     op.create_table(
         "UserProfileTable",
         sa.Column("user_id", sa.UUID(), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=True),
+        sa.Column("name", sa.Text(), nullable=True),  # Changed from String(length=255)
         sa.Column("future_me_persona_summary", sa.Text(), nullable=True),
-        sa.Column("gender_identity_pronouns", sa.String(length=100), nullable=True),
-        sa.Column("therapeutic_setting", sa.String(length=255), nullable=True),
+        sa.Column("gender_identity_pronouns", sa.Text(), nullable=True),  # Changed from String(length=100)
+        sa.Column("therapeutic_setting", sa.Text(), nullable=True),  # Changed from String(length=255)
         sa.Column("therapy_start_date", sa.Date(), nullable=True),
-        sa.Column("dfm_use_integration_status", sa.String(length=50), nullable=True),
+        sa.Column("dfm_use_integration_status", sa.Text(), nullable=True),  # Changed from String(length=50)
         sa.Column("primary_emotional_themes", sa.Text(), nullable=True),
         sa.Column("recent_triggers_events", sa.Text(), nullable=True),
         sa.Column("emotion_regulation_strengths", sa.Text(), nullable=True),
         sa.Column("identified_values", sa.Text(), nullable=True),
         sa.Column("self_reported_goals", sa.Text(), nullable=True),
         sa.Column("therapist_language_to_mirror", sa.Text(), nullable=True),
-        sa.Column("user_emotional_tone_preference", sa.String(length=100), nullable=True),
-        sa.Column("tone_alignment", sa.String(length=100), nullable=True),
+        sa.Column("user_emotional_tone_preference", sa.Text(), nullable=True),  # Changed from String(length=100)
+        sa.Column("tone_alignment", sa.Text(), nullable=True),  # Changed from String(length=100)
+        # New fields
+        sa.Column("c_ssrs_status", sa.Text(), nullable=True),
+        sa.Column("bdi_ii_score", sa.Integer(), nullable=True),
+        sa.Column("inq_status", sa.Text(), nullable=True),
         sa.Column(
             "created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
         ),

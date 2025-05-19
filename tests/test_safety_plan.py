@@ -1,4 +1,5 @@
-# /home/dfront/code/dear_future_me/tests/test_safety_plan.py
+# /home/dfront/p/dir2ai_results/dear_future_me/tests/test_safety_plan.py
+# Full file content
 import uuid
 
 import pytest
@@ -43,20 +44,22 @@ async def test_safety_plan_crud_flow(
     assert response.json()["detail"] == "Safety plan not found for this user."
 
     # 2. Create safety plan
+    # Updated data to use step_X fields
     plan_data_create = SafetyPlanCreate(
-        warning_signs="Feeling overwhelmed, withdrawing from friends.",
-        coping_strategies="Deep breathing, listen to music, call a friend.",
-        emergency_contacts="Friend: 123-456-7890, Sibling: 098-765-4321",
-        professional_help_contacts="Therapist Dr. Smith: 555-1212, Crisis Line: 988",
-        safe_environment_notes="Remove sharp objects, ensure someone is with me.",
-        reasons_for_living="My family, my pets, future goals.",
+        step_1_warning_signs="Feeling overwhelmed, withdrawing from friends.",
+        step_2_internal_coping="Deep breathing, listen to music, call a friend.",
+        step_3_social_distractions="Call Friend X, Go to Park Y",
+        step_4_help_sources="Sibling Z, Therapist T",
+        step_5_professional_resources="Hotline 123, Clinic ABC",
+        step_6_environment_risk_reduction="Remove items X, Y, Z",
     ).model_dump(exclude_unset=True)
 
     response = client.post("/me/safety-plan", json=plan_data_create, headers=headers)
     assert response.status_code == 201, response.text
     created_plan = response.json()
-    assert created_plan["warning_signs"] == plan_data_create["warning_signs"]
-    assert created_plan["coping_strategies"] == plan_data_create["coping_strategies"]
+    # Assertions updated to use step_X fields
+    assert created_plan["step_1_warning_signs"] == plan_data_create["step_1_warning_signs"]
+    assert created_plan["step_2_internal_coping"] == plan_data_create["step_2_internal_coping"]
     assert "user_id" in created_plan
     plan_user_id = created_plan["user_id"]  # Will be the current user's ID
 
@@ -64,7 +67,8 @@ async def test_safety_plan_crud_flow(
     response = client.get("/me/safety-plan", headers=headers)
     assert response.status_code == 200
     read_plan = response.json()
-    assert read_plan["warning_signs"] == plan_data_create["warning_signs"]
+    # Assertions updated to use step_X fields
+    assert read_plan["step_1_warning_signs"] == plan_data_create["step_1_warning_signs"]
     assert read_plan["user_id"] == plan_user_id
 
     # 4. Try to create safety plan again - should be 409 Conflict
@@ -73,26 +77,29 @@ async def test_safety_plan_crud_flow(
     assert response.json()["detail"] == "Safety plan already exists for this user."
 
     # 5. Update safety plan
+    # Updated data to use step_X fields
     plan_data_update = SafetyPlanUpdate(
-        warning_signs="Updated: Increased irritability.",
-        reasons_for_living="Updated: My family, my pets, future goals, and making a difference.",
+        step_1_warning_signs="Updated: Increased irritability.",
+        step_6_environment_risk_reduction="Updated: Ensure someone is always present.",
     ).model_dump(exclude_unset=True)
 
     response = client.put("/me/safety-plan", json=plan_data_update, headers=headers)
     assert response.status_code == 200, response.text
     updated_plan = response.json()
-    assert updated_plan["warning_signs"] == plan_data_update["warning_signs"]
-    assert updated_plan["reasons_for_living"] == plan_data_update["reasons_for_living"]
-    # Check that non-updated fields persist
-    assert updated_plan["coping_strategies"] == plan_data_create["coping_strategies"]
+    # Assertions updated to use step_X fields
+    assert updated_plan["step_1_warning_signs"] == plan_data_update["step_1_warning_signs"]
+    assert updated_plan["step_6_environment_risk_reduction"] == plan_data_update["step_6_environment_risk_reduction"]
+    # Check that non-updated fields persist (using step_X names)
+    assert updated_plan["step_2_internal_coping"] == plan_data_create["step_2_internal_coping"]
     assert updated_plan["user_id"] == plan_user_id
 
     # 6. Get safety plan again - should reflect updates
     response = client.get("/me/safety-plan", headers=headers)
     assert response.status_code == 200
     final_plan = response.json()
-    assert final_plan["warning_signs"] == plan_data_update["warning_signs"]
-    assert final_plan["reasons_for_living"] == plan_data_update["reasons_for_living"]
+    # Assertions updated to use step_X fields
+    assert final_plan["step_1_warning_signs"] == plan_data_update["step_1_warning_signs"]
+    assert final_plan["step_6_environment_risk_reduction"] == plan_data_update["step_6_environment_risk_reduction"]
 
 
 @pytest.mark.asyncio
@@ -102,11 +109,13 @@ async def test_safety_plan_unauthenticated_access(client: TestClient):
     assert response.status_code == 401  # Expect 401 Unauthorized
 
     # POST
-    plan_data_create = {"warning_signs": "Test"}
+    # Updated data to use step_X fields
+    plan_data_create = {"step_1_warning_signs": "Test"}
     response = client.post("/me/safety-plan", json=plan_data_create)
     assert response.status_code == 401
 
     # PUT
-    plan_data_update = {"warning_signs": "Test Update"}
+    # Updated data to use step_X fields
+    plan_data_update = {"step_1_warning_signs": "Test Update"}
     response = client.put("/me/safety-plan", json=plan_data_update)
     assert response.status_code == 401

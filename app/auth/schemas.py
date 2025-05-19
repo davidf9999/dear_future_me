@@ -45,6 +45,19 @@ class UserProfileBase(BaseModel):
     user_emotional_tone_preference: Optional[str] = Field(None, max_length=100)
     tone_alignment: Optional[str] = Field(None, max_length=100)
 
+    # New fields
+    c_ssrs_status: Optional[str] = Field(
+        None,
+        description="Latest C-SSRS status (e.g., 'Moderate ideation, no plan'). Used for adapting grounding questions.",
+    )
+    bdi_ii_score: Optional[int] = Field(
+        None, description="Latest BDI-II score. Used to inform prompts regarding hopelessness or cognitive distortions."
+    )
+    inq_status: Optional[str] = Field(
+        None,
+        description="Latest INQ status (e.g., 'High perceived burdensomeness, low belongingness'). Used to emphasize connectedness.",
+    )
+
 
 class UserProfileCreate(UserProfileBase):
     pass
