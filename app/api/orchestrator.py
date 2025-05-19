@@ -18,7 +18,7 @@ from app.db.session import get_async_session_context
 from app.rag.processor import DocumentProcessor
 from app.safety_plan import crud as safety_plan_crud
 
-cfg = get_settings()  # Initialize settings once at module level
+cfg = get_settings()
 
 
 class BranchingChain:
@@ -39,7 +39,7 @@ class BranchingChain:
 
 class Orchestrator:
     def __init__(self):
-        self.settings = cfg  # Use the module-level cfg
+        self.settings = cfg
         self._load_prompts()
         self._load_risk_keywords()
 
@@ -65,62 +65,42 @@ class Orchestrator:
             return {"reply": "An unexpected error occurred. Please try again."}
 
     def _load_prompts(self) -> None:
-        lang = self.settings.APP_DEFAULT_LANGUAGE
+        # Simplified to only load generic English prompts
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         template_dir = os.path.join(base_dir, self.settings.PROMPT_TEMPLATE_DIR)
 
-        # Simplified default strings for test matching when no files are found
         default_crisis_prompt_str = "You are a crisis responder."
         default_system_prompt_str = "Based on the following context:"
 
-        crisis_prompt_file_lang = f"{self.settings.CRISIS_PROMPT_FILE.split('.')[0]}.{lang}.md"
         crisis_prompt_file_generic = self.settings.CRISIS_PROMPT_FILE
-
-        system_prompt_file_lang = f"{self.settings.SYSTEM_PROMPT_FILE.split('.')[0]}.{lang}.md"
         system_prompt_file_generic = self.settings.SYSTEM_PROMPT_FILE
 
         # Load crisis prompt
         try:
-            path_to_try = os.path.join(template_dir, crisis_prompt_file_lang)
+            path_to_try = os.path.join(template_dir, crisis_prompt_file_generic)
             if os.path.exists(path_to_try):
                 with open(path_to_try, "r", encoding="utf-8") as f:
                     self.crisis_prompt_template_str = f.read()
             else:
+                self.crisis_prompt_template_str = default_crisis_prompt_str
                 logging.warning(
-                    f"Crisis prompt for language '{lang}' ('{crisis_prompt_file_lang}') not found. Trying generic."
+                    f"Generic crisis prompt ('{crisis_prompt_file_generic}') not found. Using hardcoded default."
                 )
-                path_to_try = os.path.join(template_dir, crisis_prompt_file_generic)
-                if os.path.exists(path_to_try):
-                    with open(path_to_try, "r", encoding="utf-8") as f:
-                        self.crisis_prompt_template_str = f.read()
-                else:
-                    self.crisis_prompt_template_str = default_crisis_prompt_str
-                    logging.warning(
-                        f"Neither language-specific nor generic crisis prompt ('{crisis_prompt_file_generic}') found. Using hardcoded default."
-                    )
         except Exception as e:
             logging.error(f"Error loading crisis prompt: {e}")
             self.crisis_prompt_template_str = default_crisis_prompt_str
 
         # Load system prompt
         try:
-            path_to_try = os.path.join(template_dir, system_prompt_file_lang)
+            path_to_try = os.path.join(template_dir, system_prompt_file_generic)
             if os.path.exists(path_to_try):
                 with open(path_to_try, "r", encoding="utf-8") as f:
                     self.system_prompt_template_str = f.read()
             else:
+                self.system_prompt_template_str = default_system_prompt_str
                 logging.warning(
-                    f"System prompt for language '{lang}' ('{system_prompt_file_lang}') not found. Trying generic."
+                    f"Generic system prompt ('{system_prompt_file_generic}') not found. Using hardcoded default."
                 )
-                path_to_try = os.path.join(template_dir, system_prompt_file_generic)
-                if os.path.exists(path_to_try):
-                    with open(path_to_try, "r", encoding="utf-8") as f:
-                        self.system_prompt_template_str = f.read()
-                else:
-                    self.system_prompt_template_str = default_system_prompt_str
-                    logging.warning(
-                        f"Neither language-specific nor generic system prompt ('{system_prompt_file_generic}') found. Using hardcoded default."
-                    )
         except Exception as e:
             logging.error(f"Error loading system prompt: {e}")
             self.system_prompt_template_str = default_system_prompt_str
@@ -129,11 +109,8 @@ class Orchestrator:
         self.system_prompt_template = ChatPromptTemplate.from_template(self.system_prompt_template_str)
 
     def _load_risk_keywords(self) -> None:
-        if self.settings.APP_DEFAULT_LANGUAGE == "he":
-            logging.info("Hebrew language selected, using placeholder English risk keywords.")
-            self._risk_keywords = ["die", "kill myself", "suicide", "hopeless", "end it all"]
-        else:
-            self._risk_keywords = ["die", "kill myself", "suicide", "hopeless", "end it all"]
+        # Simplified to only load English keywords
+        self._risk_keywords = ["die", "kill myself", "suicide", "hopeless", "end it all"]
 
     def _detect_risk(self, query: str) -> bool:
         if not query:
@@ -257,7 +234,7 @@ class RagOrchestrator(Orchestrator):
             return cast(str, summary)
         except Exception as e:
             logging.error(f"Error summarizing session {session_id}: {e}")
-            return f"Summary for {session_id} (unavailable due to error)"  # Matched to test
+            return f"Summary for {session_id} (unavailable due to error)"
 
     async def _summarize_docs_with_chain(self, docs: List[Document]) -> str:
         if not docs:

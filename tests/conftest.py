@@ -24,8 +24,9 @@ from app.db.session import get_async_session
 from app.main import create_app
 
 
+# Helper to create a mock Settings object, moved from test_orchestrator.py
 def create_mock_settings(
-    lang: str = "en",
+    # Removed lang parameter
     openai_key: Optional[str] = "test_openai_key_conftest",
     llm_model: str = "test_model_conftest",
     chroma_dir: str = "/tmp/test_chroma_conftest",
@@ -33,7 +34,7 @@ def create_mock_settings(
     chroma_port: Optional[int] = None,
 ) -> Settings:
     mock_settings = Settings(_model_config={"env_file": None})
-    mock_settings.APP_DEFAULT_LANGUAGE = lang
+    # mock_settings.APP_DEFAULT_LANGUAGE = lang # This line was the issue, lang is not defined. Removed.
     mock_settings.OPENAI_API_KEY = openai_key
     mock_settings.LLM_MODEL = llm_model
     mock_settings.PROMPT_TEMPLATE_DIR = "templates"
@@ -145,11 +146,10 @@ async def clear_tables_before_test(test_engine: AsyncEngine) -> None:
     """Clears all data from user-managed tables before each test, using its own connection."""
     tables_to_clear = [SafetyPlanTable.__tablename__, UserProfileTable.__tablename__, UserTable.__tablename__]
 
-    # Use a new connection for this operation to ensure isolation
     async with test_engine.connect() as conn:
-        async with conn.begin():  # Start a transaction
+        async with conn.begin():
             for table_name in tables_to_clear:
-                # Check existence using run_sync
+
                 def check_exists_sync(s_conn, t_name):
                     return sqlalchemy_inspect(s_conn).has_table(t_name)
 

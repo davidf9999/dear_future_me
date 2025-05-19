@@ -3,7 +3,7 @@ import os
 from enum import Enum
 from typing import Optional
 
-import chromadb.config  # Import for chromadb.config.Settings
+import chromadb.config
 from pydantic import EmailStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG_MODE: bool = False
     LOG_LEVEL: LogLevel = LogLevel.INFO
-    APP_DEFAULT_LANGUAGE: str = "en"
+    # APP_DEFAULT_LANGUAGE: str = "en" # Removed language setting
 
     # --- Database Settings ---
     DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
@@ -73,36 +73,17 @@ class Settings(BaseSettings):
     )
 
     @property
-    def CHROMA_CLIENT_SETTINGS(self) -> chromadb.config.Settings:  # Return type hint
-        # Ensure CHROMA_DIR is absolute if it's relative for local file-based Chroma
-        # This logic assumes that if CHROMA_DIR is relative, it's relative to the project root
-        # where the .env file or main application script is typically located.
-
-        # Default to local file-based Chroma if host/port are not set
+    def CHROMA_CLIENT_SETTINGS(self) -> chromadb.config.Settings:
         chroma_dir_to_use = self.CHROMA_DIR
-        if not os.path.isabs(chroma_dir_to_use):
-            # Attempt to make it absolute from a sensible project root.
-            # This might need adjustment based on your project structure and how settings are loaded.
-            # A common pattern is to define a BASE_DIR at the top of your settings file.
-            # For now, let's assume it's relative to the current working directory if not absolute.
-            # This might be problematic if CWD changes.
-            # A more robust way is to define a project root path.
-            # For testing, tmp_path fixture often provides a good absolute path.
-            pass  # Keep as is, DocumentProcessor will use it.
 
         if self.CHROMA_HOST and self.CHROMA_PORT:
             return chromadb.config.Settings(
-                chroma_api_impl="chromadb.api.fastapi.FastAPI",  # Or HttpClient
+                chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 chroma_server_host=self.CHROMA_HOST,
-                chroma_server_http_port=str(self.CHROMA_PORT),  # Port should be string for some clients
-                # Add other relevant settings for HttpClient if needed
+                chroma_server_http_port=str(self.CHROMA_PORT),
             )
         else:
-            # For local, file-based Chroma
-            return chromadb.config.Settings(
-                is_persistent=True,  # Important for file-based
-                persist_directory=chroma_dir_to_use,
-            )
+            return chromadb.config.Settings(is_persistent=True, persist_directory=chroma_dir_to_use)
 
 
 _settings_instance: Optional[Settings] = None
