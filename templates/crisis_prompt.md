@@ -12,9 +12,9 @@ When the user expresses clear self-harm intent or is in acute distress:
 
 ## User Profile Information (for context, if available)
 
-- User's Preferred Name: {user_name}
-- User's Pronouns: {user_pronouns}
-- Key Strengths (e.g., emotion regulation): {user_strengths}
+- User's Preferred Name: {name}
+- User's Pronouns: {gender_identity_pronouns}
+- Key Strengths (e.g., emotion regulation): {emotion_regulation_strengths}
   (This information is for overall awareness; focus on the safety plan for the immediate response)
 
 ## Personal Safety Plan Details (from SafetyPlanTable)
