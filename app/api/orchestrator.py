@@ -89,7 +89,7 @@ class Orchestrator:
         default_crisis_prompt_str = (
             "You are a crisis responder. User query: {query}\n"
             "User Profile: Name: {name}, Pronouns: {gender_identity_pronouns}, Strengths: {emotion_regulation_strengths}.\n"
-            "Safety Plan Details:\n"
+            "Safety Plan Details:\n"  # Added labels for clarity
             "Warning Signs: {step_1_warning_signs}\n"
             "Internal Coping Strategies: {step_2_internal_coping}\n"
             "Social Distractions: {step_3_social_distractions}\n"
@@ -98,9 +98,9 @@ class Orchestrator:
             "Environment Risk Reduction: {step_6_environment_risk_reduction}"
         )
         default_system_prompt_str = (
-            "Based on the following context: {context}\n\nUser Input: {input}\n\n"
-            "User Profile: Name: {name}, Summary: {user_profile_summary}, Persona: {future_me_persona_summary}, Pronouns: {gender_identity_pronouns}, Therapeutic Setting: {therapeutic_setting}.\n"
-            "Safety Plan Summary: {user_safety_plan_summary}.\n"
+            "Based on the following context: {context}\n\nUser Input: {input}\n\n"  # Added labels for clarity
+            "User Profile:\nName: {name}\nSummary: {user_profile_summary}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\nTherapeutic Setting: {therapeutic_setting}.\n"
+            "Safety Plan Summary: {user_safety_plan_summary}.\n"  # This is a summary, not individual steps
             "Identified Values: {identified_values}.\n"
             "Tone Alignment: {tone_alignment}.\n"
             "Self-Reported Goals: {self_reported_goals}.\n"

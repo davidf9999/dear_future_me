@@ -1,4 +1,4 @@
-# templates/crisis_prompt.md
+# /home/dfront/code/dear_future_me/templates/crisis_prompt.md
 # Full file content
 # Crisis Responder Prompt
 
