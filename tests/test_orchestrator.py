@@ -4,7 +4,7 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch  # Import ANY
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -256,10 +256,11 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     future_me_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_FUTURE_ME]["retriever_mock"]
     personal_plan_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_PERSONAL_PLAN]["retriever_mock"]
 
-    # EnsembleRetriever calls ainvoke on its components
-    theory_retriever_mock.ainvoke.assert_called_once_with(query_text)
-    future_me_retriever_mock.ainvoke.assert_called_once_with(query_text)
-    personal_plan_retriever_mock.ainvoke.assert_called_once_with(query_text)
+    # EnsembleRetriever calls ainvoke on its components.
+    # The second argument is typically a RunnableConfig object.
+    theory_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
+    future_me_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
+    personal_plan_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
     # ... can add more for other retrievers if specific interactions are expected for all
 
     assert patched_llm_ainvoke.call_count > 0, "LLM ainvoke was not called"
