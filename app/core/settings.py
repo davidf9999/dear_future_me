@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     ASR_TIMEOUT_SECONDS: int = 60  # Restored from old version
 
     # ChromaDB settings
-    CHROMA_HOST: Optional[str] = os.getenv("CHROMA_HOST", None)  # Made Optional
-    CHROMA_PORT: Optional[int] = int(os.getenv("CHROMA_PORT")) if os.getenv("CHROMA_PORT") else None  # Made Optional
+    CHROMA_HOST: Optional[str] = os.getenv("CHROMA_HOST", None)
+    CHROMA_PORT: Optional[int] = int(os.getenv("CHROMA_PORT")) if os.getenv("CHROMA_PORT") else None
     CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
 
     # RAG Namespaces (Collections in ChromaDB)
