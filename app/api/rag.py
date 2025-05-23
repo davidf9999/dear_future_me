@@ -23,12 +23,11 @@ class IngestResponse(BaseModel):
 @router.post(
     "/ingest/",
     status_code=status.HTTP_200_OK,
-    response_model=IngestResponse,  # Use the new response model
+    response_model=IngestResponse,
 )
 async def ingest_document(
     namespace: str = Form(
         ...,
-        # Updated pattern to match new namespaces from settings
         pattern=(
             f"^({settings.CHROMA_NAMESPACE_THEORY}|"
             f"{settings.CHROMA_NAMESPACE_PERSONAL_PLAN}|"
@@ -39,9 +38,8 @@ async def ingest_document(
         ),
     ),
     doc_id: str = Form(...),
-    text: Optional[str] = Form(None),  # Made Optional
-    file: Optional[UploadFile] = None,  # Kept as Optional
-    # orchestrator: RagOrchestrator = Depends(get_orchestrator) # Orchestrator not directly needed for ingest here
+    text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = None,
 ):
     if not text and not file:
         raise HTTPException(

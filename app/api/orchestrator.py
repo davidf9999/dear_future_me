@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, cast
 
 from fastapi import Request
 from langchain.prompts import ChatPromptTemplate
+from langchain.retrievers import EnsembleRetriever  # Added import
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
@@ -317,7 +318,7 @@ class RagOrchestrator(Orchestrator):
         )
 
         self._crisis_chain = self._build_crisis_chain()
-        self._rag_chain = self._build_actual_rag_chain()
+        self._rag_chain = self._build_actual_rag_chain()  # This will now use the combined retriever
         self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
         self.summarize_prompt_template = ChatPromptTemplate.from_template(
@@ -326,11 +327,35 @@ class RagOrchestrator(Orchestrator):
         self.summarize_chain: Runnable = self.summarize_prompt_template | self.llm | StrOutputParser()
 
     def _get_combined_retriever(self) -> BaseRetriever:
-        logging.info("_get_combined_retriever is using future_me_db as a placeholder for combined retrieval.")
-        return self.future_me_db.vectordb.as_retriever(search_kwargs={"k": 3})
+        logging.info("Initializing combined retriever with EnsembleRetriever for multiple namespaces.")
+
+        retriever_k = 2  # Number of documents to fetch from each individual retriever
+
+        # List of all DocumentProcessor instances for RAG
+        # These are already initialized in __init__
+        all_dbs = [
+            self.theory_db,
+            self.personal_plan_db,
+            self.session_data_db,
+            self.future_me_db,
+            self.therapist_notes_db,
+            self.dfm_chat_history_summaries_db,
+        ]
+
+        retrievers_list = [db.vectordb.as_retriever(search_kwargs={"k": retriever_k}) for db in all_dbs]
+
+        # For now, use equal weights. Weights can be tuned later if some sources are more important.
+        # Example: weights = [0.2, 0.2, 0.1, 0.2, 0.1, 0.2]
+        # Ensure the number of weights matches the number of retrievers if provided.
+
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=retrievers_list
+            # weights=weights # Optional: add weights later if needed for ranking
+        )
+        return ensemble_retriever
 
     def _build_actual_rag_chain(self) -> Runnable:
-        retriever = self._get_combined_retriever()
+        retriever = self._get_combined_retriever()  # This now returns the EnsembleRetriever
 
         def format_docs(docs: list[Document]) -> str:
             return "\n\n".join(doc.page_content for doc in docs)
@@ -338,13 +363,14 @@ class RagOrchestrator(Orchestrator):
         async def prepare_rag_input_with_retrieval_and_user_data(input_dict: Dict[str, Any]) -> Dict[str, Any]:
             query = input_dict.get("input", "")
             user = input_dict.get("user")
+            # The ensemble retriever is invoked here
             retrieved_docs = await retriever.ainvoke(query)
             formatted_docs = format_docs(retrieved_docs)
             user_data_dict = await self._get_user_data_for_prompt(user)
 
             final_rag_input = {
                 "input": query,
-                "context": formatted_docs,  # This context is for RAG
+                "context": formatted_docs,  # This context is for RAG, now from multiple sources
                 **user_data_dict,
             }
             return final_rag_input
@@ -358,6 +384,7 @@ class RagOrchestrator(Orchestrator):
 
     async def summarize_session(self, session_id: str) -> str:
         logging.info(f"Attempting to summarize session data for: {session_id}")
+        # TODO: Actual implementation to fetch session data for summarization
         text_to_summarize = (
             f"Placeholder data for session {session_id}. User discussed future goals and coping strategies."
         )
