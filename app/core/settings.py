@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/core/settings.py
+# app/core/settings.py
 # Full file content
 import os
 from enum import Enum

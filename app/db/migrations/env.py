@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/db/migrations/env.py
+# app/db/migrations/env.py
 import asyncio
 import os
 import sys

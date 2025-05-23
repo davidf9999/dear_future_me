@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/auth/router.py
+# app/auth/router.py
 import uuid
 from typing import (
     Optional,  # Added for Request type hint if you uncomment on_after_register

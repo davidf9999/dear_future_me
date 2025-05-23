@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/safety_plan/router.py
+# app/safety_plan/router.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 

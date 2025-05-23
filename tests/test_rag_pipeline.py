@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/test_rag_pipeline.py
+# tests/test_rag_pipeline.py
 # Full file content
 import os
 import uuid  # For unique user emails

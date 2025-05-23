@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/Makefile
+# Makefile
 
 # Default shell for make to use
 SHELL := /bin/bash

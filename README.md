@@ -319,15 +319,8 @@ All vector data is persisted under the directory defined by `CHROMA_DIR` in `app
 
 ### Ingesting Demo Data
 
-Sample text files are provided in the `demo_data/` folder. Use the `demo_ingestion.sh` script to ingest them (ensure `CHROMA_DIR` in the script matches your setup if not using Docker Compose defaults):
-
-```bash
-# For development environment
-./demo_ingestion.sh dev
-# For production-like local environment
-./demo_ingestion.sh prod
-```
-This script first clears old demo collections from the specified `CHROMA_DIR` and then uses `curl` to call the `/rag/ingest/` endpoint for each demo file.
+Sample text files are provided in the `RDB_demo_data/` and `RAG_demo_data/` folders.  
+Use the "TO DO fill here" script/s to ingest them.
 
 ### Cleaning the RAG Store
 

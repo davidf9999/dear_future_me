@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/test_user_profile.py
+# tests/test_user_profile.py
 import uuid
 
 import pytest

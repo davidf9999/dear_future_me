@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/conftest.py
+# tests/conftest.py
 # Full file content
 import asyncio
 import logging

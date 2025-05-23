@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/scripts/dump_schema.py
+# scripts/dump_schema.py
 # Full file content
 import logging
 import sqlite3

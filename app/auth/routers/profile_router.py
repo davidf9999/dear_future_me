@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/auth/routers/profile_router.py
+# app/auth/routers/profile_router.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 

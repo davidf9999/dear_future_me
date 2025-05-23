@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/api/rag.py
+# app/api/rag.py
 # Full file content
 import logging  # Added for logging
 from typing import Optional

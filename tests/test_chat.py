@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/test_chat.py
+# tests/test_chat.py
 import uuid
 
 import pytest

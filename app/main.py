@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/main.py
+# app/main.py
 import logging
 import os  # Added for os.makedirs
 from contextlib import asynccontextmanager

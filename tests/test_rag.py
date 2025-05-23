@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/tests/test_rag.py
+# tests/test_rag.py
 # Full file content
 import logging
 import os

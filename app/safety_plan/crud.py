@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/safety_plan/crud.py
+# app/safety_plan/crud.py
 from typing import Optional
 from uuid import UUID
 

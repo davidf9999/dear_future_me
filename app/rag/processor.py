@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/app/rag/processor.py
+# app/rag/processor.py
 # Full file content
 import logging
 from typing import Any, Dict, List, Optional

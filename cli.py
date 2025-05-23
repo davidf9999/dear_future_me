@@ -1,4 +1,4 @@
-# /home/dfront/code/dear_future_me/cli.py
+# cli.py
 # Full file content
 import logging
 
