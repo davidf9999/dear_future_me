@@ -97,12 +97,9 @@ class Settings(BaseSettings):
     STREAMLIT_DEBUG: bool = os.getenv("STREAMLIT_DEBUG", "false").lower() == "true"
 
     class Config:
-        case_sensitive = True  # Changed from False in old model_config, adjust if needed
+        case_sensitive = True
         env_file = ".env"
         env_file_encoding = "utf-8"
-        # To allow extra fields without validation errors, you could use:
-        # extra = "ignore"
-        # However, it's generally better to explicitly define all expected settings.
 
 
 _settings_instance = None
