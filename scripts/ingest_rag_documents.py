@@ -1,72 +1,100 @@
-# scripts/ingest_rag_documents.py
-import asyncio
-from pathlib import Path
+# /home/dfront/code/dear_future_me/scripts/ingest_rag_documents.py
+# Full file content
+import logging
+import os
 
-import httpx
+from app.core.settings import get_settings
+from app.rag.processor import DocumentProcessor
 
-# Assuming your FastAPI app runs on localhost:8000
-BASE_API_URL = "http://localhost:8000"
-# Define your RAG source directory and how to map files to namespaces
-RAG_SOURCE_DIR = Path(__file__).parent.parent / "rag_sources"  # Example path
-# Example: files in RAG_SOURCE_DIR/theory go to settings.CHROMA_NAMESPACE_THEORY
-# You'll need to import your settings to get the actual namespace values
-# from app.core.settings import get_settings
-# settings = get_settings()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
 
 
-async def ingest_single_document(client: httpx.AsyncClient, namespace: str, doc_id: str, file_path: Path):
+def ingest_file_to_namespace(namespace: str, file_path: str, doc_id: str):
+    """
+    Ingests content from a text file into the specified ChromaDB namespace.
+
+    Args:
+        namespace: The ChromaDB namespace (collection name).
+        file_path: Path to the text file.
+        doc_id: The ID for the document.
+    """
+    if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        text_content = f.read()
+
+    ingest_text_to_namespace(namespace, text_content, doc_id)
+
+
+def ingest_text_to_namespace(namespace: str, text_content: str, doc_id: str):
+    """
+    Ingests raw text content into the specified ChromaDB namespace.
+
+    Args:
+        namespace: The ChromaDB namespace (collection name).
+        text_content: The text content to ingest.
+        doc_id: The ID for the document.
+    """
+    logger.info(f"Initializing DocumentProcessor for namespace: {namespace}")
+
+    # Determine if we are using remote Chroma or local based on settings
+    # This logic mirrors DocumentProcessor's internal decision
+    use_remote_chroma = bool(settings.CHROMA_HOST and settings.CHROMA_PORT)
+
+    if use_remote_chroma:
+        processor = DocumentProcessor(
+            namespace=namespace,
+            chroma_host=settings.CHROMA_HOST,
+            chroma_port=settings.CHROMA_PORT,
+        )
+        logger.info(f"Using remote Chroma server for ingestion: {settings.CHROMA_HOST}:{settings.CHROMA_PORT}")
+    else:
+        processor = DocumentProcessor(namespace=namespace, persist_directory=settings.CHROMA_PERSIST_DIR)
+        logger.info(f"Using local persistent Chroma for ingestion at: {settings.CHROMA_PERSIST_DIR}")
+
+    logger.info(f"Ingesting document ID '{doc_id}' into namespace '{namespace}'.")
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # The API expects form data
-        data = {
-            "namespace": namespace,
-            "doc_id": doc_id,
-            # "text": content # Use 'text' if sending directly
-        }
-        files = {"file": (file_path.name, open(file_path, "rb"), "text/markdown")}  # Or appropriate content type
-
-        # response = await client.post(f"{BASE_API_URL}/rag/ingest/", data=data, files=files) # If sending as file
-        response = await client.post(
-            f"{BASE_API_URL}/rag/ingest/", data={**data, "text": content}
-        )  # If sending as text
-
-        if 200 <= response.status_code < 300:
-            print(f"Successfully ingested {doc_id} into {namespace}: {response.json()}")
-        else:
-            print(
-                f"Failed to ingest {doc_id} into {namespace}. Status: {response.status_code}, Response: {response.text}"
-            )
+        processor.ingest(doc_id=doc_id, text=text_content)
+        # If using local Chroma and explicit persistence is desired (though often automatic)
+        if not use_remote_chroma:
+            processor.persist()  # Chroma client handles persistence, but calling it ensures it if needed.
+        logger.info(f"Successfully ingested document ID '{doc_id}'.")
     except Exception as e:
-        print(f"Error ingesting {doc_id} from {file_path}: {e}")
-    finally:
-        # Close the file if opened with 'rb' for the files parameter
-        if "files" in locals() and files["file"][1]:
-            files["file"][1].close()
-
-
-async def main():
-    # This is a simplified example. You'd need more robust logic
-    # to determine namespace and doc_id from file paths/names.
-    # For example, map subdirectories to namespaces.
-
-    # Example: Ingest all .md files from a 'theory' subdirectory into the theory namespace
-    # theory_namespace = settings.CHROMA_NAMESPACE_THEORY # Get from settings
-    theory_namespace = "dfm_theory"  # Placeholder if settings not imported here
-    theory_docs_path = RAG_SOURCE_DIR / "theory"
-
-    async with httpx.AsyncClient() as client:
-        if theory_docs_path.exists() and theory_docs_path.is_dir():
-            for md_file in theory_docs_path.glob("*.md"):
-                doc_id = md_file.stem  # Use filename without extension as doc_id
-                await ingest_single_document(client, theory_namespace, doc_id, md_file)
-        else:
-            print(f"Directory not found: {theory_docs_path}")
-
-        # Repeat for other namespaces and their source directories...
+        logger.error(f"Error during ingestion of document ID '{doc_id}': {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
-    # Make sure your FastAPI server is running before executing this script.
-    asyncio.run(main())
+    # Example usage (for direct script execution testing)
+    # Ensure your .env file is configured or settings are available
+    # For local Chroma, CHROMA_HOST and CHROMA_PORT should be unset or None in .env
+    # For remote Chroma, CHROMA_HOST and CHROMA_PORT should be set.
+
+    example_namespace = settings.CHROMA_NAMESPACE_THEORY  # or any other test namespace
+    example_doc_id = "cli_test_doc_001"
+    example_text = "This is a test document ingested via the CLI script."
+
+    # To test file ingestion:
+    # test_file_path = "path/to/your/testfile.txt"
+    # with open(test_file_path, "w") as f:
+    #     f.write("Content for the test file.")
+    # try:
+    #     print(f"Testing file ingestion into namespace: {example_namespace}")
+    #     ingest_file_to_namespace(example_namespace, test_file_path, "cli_test_file_doc_001")
+    #     print("File ingestion test successful.")
+    # except Exception as e:
+    #     print(f"File ingestion test failed: {e}")
+
+    # To test text ingestion:
+    try:
+        print(f"\nTesting text ingestion into namespace: {example_namespace}")
+        ingest_text_to_namespace(example_namespace, example_text, example_doc_id)
+        print("Text ingestion test successful.")
+    except Exception as e:
+        print(f"Text ingestion test failed: {e}")

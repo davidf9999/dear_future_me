@@ -45,6 +45,7 @@ def create_mock_settings() -> Settings:
         CHROMA_HOST=None,  # Ensure tests use local Chroma
         CHROMA_PORT=None,  # Ensure tests use local Chroma
         DATABASE_URL=os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///./test.db"),  # Ensure test DB is used
+        OPENAI_API_KEY="test_openai_api_key_for_pytest",  # Use a consistent test key
     )
     return mock_settings
 
@@ -195,3 +196,29 @@ def client(
 
     with TestClient(fastapi_app) as c:
         yield c
+
+
+@pytest.fixture
+def temp_prompt_files(tmp_path, session_setup_and_migrations):  # Depends on session_setup to get mocked settings
+    """
+    Creates temporary prompt files for testing.
+    Uses tmp_path for function scope, ensuring settings are mocked before accessing them.
+    Note: If you need session-scoped prompt files, use tmp_path_factory and scope="session".
+    For now, keeping it function-scoped as it's simpler with tmp_path.
+    """
+    settings = get_settings()  # Get the mocked settings
+    prompt_dir = tmp_path / settings.PROMPT_TEMPLATE_DIR
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    (prompt_dir / settings.SYSTEM_PROMPT_FILE).write_text(
+        "System: You are a helpful AI. Context: {context} User: {question} User Data: {user_data}"
+    )
+    (prompt_dir / settings.CRISIS_PROMPT_FILE).write_text(
+        "Crisis: Respond with empathy. Context: {context} User: {question} User Data: {user_data}"
+    )
+
+    original_prompt_dir = settings.PROMPT_TEMPLATE_DIR
+    settings.PROMPT_TEMPLATE_DIR = str(prompt_dir)  # Use the string path
+    yield str(prompt_dir)  # Provide the path if needed
+    settings.PROMPT_TEMPLATE_DIR = original_prompt_dir
+    # shutil.rmtree(prompt_dir_str) # tmp_path handles cleanup

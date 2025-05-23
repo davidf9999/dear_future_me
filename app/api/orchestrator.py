@@ -2,504 +2,329 @@
 # Full file content
 import logging
 import os
-from typing import Any, Dict, List, Optional, cast
+from operator import itemgetter  # Moved to top
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import Request
-from langchain.prompts import ChatPromptTemplate
+from fastapi import Depends, HTTPException, Request
 from langchain.retrievers import EnsembleRetriever
+from langchain.retrievers.document_compressors import FlashrankRerank
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
 
-from app.auth import crud_profile
-from app.auth.models import SafetyPlanTable, UserTable
-from app.core.settings import get_settings
-from app.db.session import get_async_session_context
+from app.api.models import UserData
+from app.core.settings import Settings, get_settings
 from app.rag.processor import DocumentProcessor
-from app.safety_plan import crud as safety_plan_crud
 
-cfg = get_settings()
-
-
-class BranchingChain:
-    def __init__(self, risk_detector, crisis_chain, rag_chain):
-        self.risk_detector = risk_detector
-        self.crisis_chain = crisis_chain
-        self.rag_chain = rag_chain
-
-    async def ainvoke(self, inputs: Dict[str, Any]) -> str:
-        query = inputs.get("query", "")
-        user = inputs.get("user")
-
-        if self.risk_detector(query):
-            logging.info(f"Risk detected in query: '{query}'. Routing to crisis chain.")
-            # For crisis chain, the user's direct query is the primary input.
-            return await self.crisis_chain.ainvoke(
-                {
-                    "query": query,  # User's direct message indicating crisis
-                    "user": user,
-                }
-            )
-        else:
-            logging.info(f"No immediate risk detected in query: '{query}'. Routing to RAG chain.")
-            # For RAG chain, 'input' is the standard key.
-            return await self.rag_chain.ainvoke(
-                {
-                    "input": query,  # User's message for general chat
-                    "user": user,
-                }
-            )
+logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    def __init__(self):
-        self.settings = cfg
-        self._load_prompts()
-        self._load_risk_keywords()
+    """
+    Main orchestrator for handling chat interactions, deciding between RAG and crisis mode.
+    """
 
+    def __init__(self, settings: Settings = Depends(get_settings)):
+        self.settings = settings
         self.llm = ChatOpenAI(
-            model=self.settings.LLM_MODEL,
-            temperature=self.settings.LLM_TEMPERATURE,
-            api_key=self.settings.OPENAI_API_KEY,
+            model_name=settings.LLM_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            openai_api_key=settings.OPENAI_API_KEY,
         )
-        self._crisis_chain = self._build_crisis_chain()  # Base crisis chain
-        self._rag_chain = self._build_placeholder_rag_chain()
-        self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
+        self.rag_orchestrator: Optional[RagOrchestrator] = None
+        # Lazily initialize RagOrchestrator or ensure it's passed if always needed
 
-    async def answer(self, message: str, user: Optional[UserTable] = None) -> Dict[str, Any]:
+    def _get_rag_orchestrator(self) -> "RagOrchestrator":
+        if self.rag_orchestrator is None:
+            self.rag_orchestrator = RagOrchestrator(settings=self.settings)
+        return self.rag_orchestrator
+
+    def _load_prompt_template(self, file_name: str) -> ChatPromptTemplate:
+        """Loads a prompt template from a file."""
+        file_path = os.path.join(self.settings.PROMPT_TEMPLATE_DIR, file_name)
+        logger.debug(f"Attempting to load prompt template from: {file_path}")
         try:
-            # Pass the message as both 'query' (for crisis detection/chain)
-            # and 'input' (for RAG chain) to the branching chain.
-            reply_content = await self.chain.ainvoke({"query": message, "input": message, "user": user})
-            return {"reply": reply_content}
-        except KeyError as e:
-            logging.error(
-                f"KeyError during prompt formatting: {e}. This means a variable is missing for the prompt template."
-            )
-            return {
-                "reply": "I’m sorry, there was an issue preparing my response due to missing information. Please contact support."
-            }
-        except RuntimeError as e:
-            logging.error(f"Error during chain invocation: {e}")
-            return {"reply": "I’m sorry, I’m unable to answer that right now. Please try again later."}
+            with open(file_path, "r", encoding="utf-8") as f:
+                template_content = f.read()
+            return ChatPromptTemplate.from_template(template_content)
+        except FileNotFoundError:
+            logger.error(f"Prompt template file not found: {file_path}")
+            # Propagate the error; do not use a default.
+            raise
         except Exception as e:
-            logging.exception(f"Unexpected error in Orchestrator.answer: {e}")
-            return {"reply": "An unexpected error occurred. Please try again."}
+            logger.error(f"Error loading prompt template {file_path}: {e}")
+            # Propagate the error
+            raise
 
-    def _load_prompts(self) -> None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        template_dir = os.path.join(base_dir, self.settings.PROMPT_TEMPLATE_DIR)
+    def _is_crisis_message(self, message: str) -> bool:
+        """Determines if a message indicates a crisis situation."""
+        return any(keyword.lower() in message.lower() for keyword in self.settings.CRISIS_KEYWORDS)
 
-        default_crisis_prompt_str = (
-            "You are a crisis responder. User query: {query}\n"
-            "User Profile: Name: {name}, Pronouns: {gender_identity_pronouns}, Strengths: {emotion_regulation_strengths}.\n"
-            "Safety Plan Details:\n"
-            "Warning Signs: {step_1_warning_signs}\n"
-            "Internal Coping Strategies: {step_2_internal_coping}\n"
-            "Social Distractions: {step_3_social_distractions}\n"
-            "Help Sources: {step_4_help_sources}\n"
-            "Professional Resources: {step_5_professional_resources}\n"
-            "Environment Risk Reduction: {step_6_environment_risk_reduction}\n"
-            "Relevant Insights from Personal Plan: {personal_plan_context}"  # Added placeholder
-        )
-        default_system_prompt_str = (
-            "Based on the following context: {context}\n\nUser Input: {input}\n\n"
-            "User Profile:\nName: {name}\nSummary: {user_profile_summary}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\nTherapeutic Setting: {therapeutic_setting}.\n"
-            "Therapy Start Date: {therapy_start_date}.\nDFM Use Integration Status: {dfm_use_integration_status}.\n"
-            "C-SSRS Status: {c_ssrs_status}.\nBDI-II Score: {bdi_ii_score}.\nINQ Status: {inq_status}.\n"
-            "Safety Plan Summary: {user_safety_plan_summary}.\n"
-            "Identified Values: {identified_values}.\n"
-            "Tone Alignment: {tone_alignment}.\n"
-            "Self-Reported Goals: {self_reported_goals}.\n"
-            "Recent Triggers/Events: {recent_triggers_events}.\n"
-            "Emotion Regulation Strengths: {emotion_regulation_strengths}.\n"
-            "Primary Emotional Themes: {primary_emotional_themes}.\n"
-            "Therapist Language to Mirror: {therapist_language_to_mirror}.\n"
-            "User Emotional Tone Preference: {user_emotional_tone_preference}."
+    async def answer(
+        self,
+        message: str,
+        user_id: Optional[str] = None,
+        user_data: Optional[UserData] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Processes the user's message and returns an appropriate response.
+        Switches to crisis mode if keywords are detected.
+        Otherwise, uses the RAG orchestrator.
+        """
+        logger.info(
+            f"Orchestrator received message: '{message[:50]}...' for user_id: {user_id}, session_id: {session_id}"
         )
 
-        crisis_prompt_file_generic = self.settings.CRISIS_PROMPT_FILE
-        system_prompt_file_generic = self.settings.SYSTEM_PROMPT_FILE
+        if self._is_crisis_message(message):
+            logger.warning(f"Crisis keywords detected in message from user_id: {user_id}. Switching to crisis mode.")
+            # crisis_prompt = self._load_prompt_template(self.settings.CRISIS_PROMPT_FILE) # Variable unused
+            # The crisis prompt is loaded by RagOrchestrator itself.
 
-        try:
-            path_to_try = os.path.join(template_dir, crisis_prompt_file_generic)
-            if os.path.exists(path_to_try):
-                with open(path_to_try, "r", encoding="utf-8") as f:
-                    self.crisis_prompt_template_str = f.read()
-            else:
-                self.crisis_prompt_template_str = default_crisis_prompt_str
-                logging.warning(
-                    f"Generic crisis prompt ('{crisis_prompt_file_generic}') not found. Using hardcoded default."
-                )
-        except Exception as e:
-            logging.error(f"Error loading crisis prompt: {e}")
-            self.crisis_prompt_template_str = default_crisis_prompt_str
+            rag_orchestrator = self._get_rag_orchestrator()
+            return await rag_orchestrator.handle_crisis_message(message, user_id, user_data)
 
-        try:
-            path_to_try = os.path.join(template_dir, system_prompt_file_generic)
-            if os.path.exists(path_to_try):
-                with open(path_to_try, "r", encoding="utf-8") as f:
-                    self.system_prompt_template_str = f.read()
-            else:
-                self.system_prompt_template_str = default_system_prompt_str
-                logging.warning(
-                    f"Generic system prompt ('{system_prompt_file_generic}') not found. Using hardcoded default."
-                )
-        except Exception as e:
-            logging.error(f"Error loading system prompt: {e}")
-            self.system_prompt_template_str = default_system_prompt_str
+        # Proceed with RAG if not a crisis
+        rag_orchestrator = self._get_rag_orchestrator()
+        return await rag_orchestrator.answer(message, user_id, user_data, session_id)
 
-        self.crisis_prompt_template = ChatPromptTemplate.from_template(self.crisis_prompt_template_str)
-        self.system_prompt_template = ChatPromptTemplate.from_template(self.system_prompt_template_str)
-
-    def _load_risk_keywords(self) -> None:
-        # Load from settings
-        self._risk_keywords = [kw.lower() for kw in self.settings.CRISIS_KEYWORDS]
-        if not self._risk_keywords:
-            logging.warning("No crisis keywords loaded from settings. Risk detection might be ineffective.")
-            # Fallback to a minimal set if settings are empty, to prevent complete failure
-            self._risk_keywords = ["suicide", "kill myself"]
-
-    def _detect_risk(self, query: str) -> bool:
-        if not query:
-            return False
-        return any(keyword in query.lower() for keyword in self._risk_keywords)
-
-    async def _get_user_data_for_prompt(self, user: Optional[UserTable]) -> Dict[str, Any]:
-        user_data: Dict[str, Any] = {
-            "name": "User",
-            "user_profile_summary": "User profile not available.",
-            "future_me_persona_summary": "Future persona summary not available.",
-            "gender_identity_pronouns": "Pronouns not specified.",
-            "emotion_regulation_strengths": "Strengths not specified.",
-            "therapeutic_setting": "Setting not specified.",
-            "identified_values": "Values not specified.",
-            "tone_alignment": "Tone alignment not specified.",
-            "self_reported_goals": "Goals not specified.",
-            "recent_triggers_events": "Recent triggers/events not specified.",
-            "primary_emotional_themes": "Primary emotional themes not specified.",
-            "therapist_language_to_mirror": "Therapist language to mirror not specified.",
-            "user_emotional_tone_preference": "User emotional tone preference not specified.",
-            "user_safety_plan_summary": "User safety plan summary not available.",
-            "therapy_start_date": "Not available.",
-            "dfm_use_integration_status": "Not available.",
-            "c_ssrs_status": "Not available.",
-            "bdi_ii_score": "Not available.",
-            "inq_status": "Not available.",
-            "step_1_warning_signs": "Not specified.",
-            "step_2_internal_coping": "Not specified.",
-            "step_3_social_distractions": "Not specified.",
-            "step_4_help_sources": "Not specified.",
-            "step_5_professional_resources": "Not specified.",
-            "step_6_environment_risk_reduction": "Not specified.",
-            "raw_safety_plan": None,
-            "personal_plan_context": "No specific personal plan context retrieved.",  # Default for crisis prompt
-        }
-
-        if user and user.id:
-            try:
-                async with get_async_session_context() as db:
-                    profile = await crud_profile.get_user_profile(db, user_id=user.id)
-                    if profile:
-                        profile_parts = []
-                        if profile.name:
-                            profile_parts.append(f"Name: {profile.name}.")
-                        if profile.future_me_persona_summary:
-                            profile_parts.append(f"Persona Summary: {profile.future_me_persona_summary}.")
-                            user_data["future_me_persona_summary"] = profile.future_me_persona_summary
-
-                        user_data["name"] = getattr(profile, "name", None) or user_data["name"]
-                        user_data["gender_identity_pronouns"] = (
-                            getattr(profile, "gender_identity_pronouns", None) or user_data["gender_identity_pronouns"]
-                        )
-                        user_data["emotion_regulation_strengths"] = (
-                            getattr(profile, "emotion_regulation_strengths", None)
-                            or user_data["emotion_regulation_strengths"]
-                        )
-                        user_data["therapeutic_setting"] = (
-                            getattr(profile, "therapeutic_setting", None) or user_data["therapeutic_setting"]
-                        )
-                        user_data["identified_values"] = (
-                            getattr(profile, "identified_values", None) or user_data["identified_values"]
-                        )
-                        user_data["tone_alignment"] = (
-                            getattr(profile, "tone_alignment", None) or user_data["tone_alignment"]
-                        )
-                        user_data["self_reported_goals"] = (
-                            getattr(profile, "self_reported_goals", None) or user_data["self_reported_goals"]
-                        )
-                        user_data["recent_triggers_events"] = (
-                            getattr(profile, "recent_triggers_events", None) or user_data["recent_triggers_events"]
-                        )
-                        user_data["primary_emotional_themes"] = (
-                            getattr(profile, "primary_emotional_themes", None) or user_data["primary_emotional_themes"]
-                        )
-                        user_data["therapist_language_to_mirror"] = (
-                            getattr(profile, "therapist_language_to_mirror", None)
-                            or user_data["therapist_language_to_mirror"]
-                        )
-                        user_data["user_emotional_tone_preference"] = (
-                            getattr(profile, "user_emotional_tone_preference", None)
-                            or user_data["user_emotional_tone_preference"]
-                        )
-                        user_data["therapy_start_date"] = (
-                            str(profile.therapy_start_date)
-                            if profile.therapy_start_date
-                            else user_data["therapy_start_date"]
-                        )
-                        user_data["dfm_use_integration_status"] = (
-                            profile.dfm_use_integration_status or user_data["dfm_use_integration_status"]
-                        )
-                        user_data["c_ssrs_status"] = profile.c_ssrs_status or user_data["c_ssrs_status"]
-                        user_data["bdi_ii_score"] = profile.bdi_ii_score or user_data["bdi_ii_score"]
-                        user_data["inq_status"] = profile.inq_status or user_data["inq_status"]
-
-                        if profile_parts:
-                            user_data["user_profile_summary"] = " ".join(profile_parts)
-                        else:
-                            user_data["user_profile_summary"] = "User profile exists but has no summary details."
-
-                    safety_plan: Optional[SafetyPlanTable] = await safety_plan_crud.get_safety_plan_by_user_id(
-                        db, user_id=user.id
-                    )
-                    user_data["raw_safety_plan"] = safety_plan
-
-                    if safety_plan:
-                        summary_parts = []
-                        if safety_plan.step_1_warning_signs:
-                            summary_parts.append(f"Warning Signs: {safety_plan.step_1_warning_signs}.")
-                        if safety_plan.step_2_internal_coping:
-                            summary_parts.append(f"Internal Coping Strategies: {safety_plan.step_2_internal_coping}.")
-                        if summary_parts:
-                            user_data["user_safety_plan_summary"] = " ".join(summary_parts)
-                        else:
-                            user_data["user_safety_plan_summary"] = (
-                                "User safety plan exists but has no summary details."
-                            )
-
-                        user_data["step_1_warning_signs"] = safety_plan.step_1_warning_signs or "Not specified."
-                        user_data["step_2_internal_coping"] = safety_plan.step_2_internal_coping or "Not specified."
-                        user_data["step_3_social_distractions"] = (
-                            safety_plan.step_3_social_distractions or "Not specified."
-                        )
-                        user_data["step_4_help_sources"] = safety_plan.step_4_help_sources or "Not specified."
-                        user_data["step_5_professional_resources"] = (
-                            safety_plan.step_5_professional_resources or "Not specified."
-                        )
-                        user_data["step_6_environment_risk_reduction"] = (
-                            safety_plan.step_6_environment_risk_reduction or "Not specified."
-                        )
-            except Exception as e:
-                logging.error(f"Error fetching user data for user {user.id}: {e}")
-        return user_data
-
-    def _build_crisis_chain(self) -> Runnable:
-        # Base Orchestrator's crisis chain does not use RAG from personal_plan
-        async def prepare_crisis_input(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            user = input_dict.get("user")
-            user_data_dict = await self._get_user_data_for_prompt(user)
-
-            return_dict = {
-                "query": input_dict.get("query", ""),
-                "name": user_data_dict.get("name", "User"),
-                "gender_identity_pronouns": user_data_dict.get("gender_identity_pronouns", "not specified"),
-                "emotion_regulation_strengths": user_data_dict.get(
-                    "emotion_regulation_strengths", "Strengths not specified."
-                ),
-                "step_1_warning_signs": user_data_dict.get("step_1_warning_signs"),
-                "step_2_internal_coping": user_data_dict.get("step_2_internal_coping"),
-                "step_3_social_distractions": user_data_dict.get("step_3_social_distractions"),
-                "step_4_help_sources": user_data_dict.get("step_4_help_sources"),
-                "step_5_professional_resources": user_data_dict.get("step_5_professional_resources"),
-                "step_6_environment_risk_reduction": user_data_dict.get("step_6_environment_risk_reduction"),
-                "personal_plan_context": user_data_dict.get(
-                    "personal_plan_context", "No specific personal plan context retrieved."
-                ),  # From default
-            }
-            return return_dict
-
-        return RunnableLambda(prepare_crisis_input) | self.crisis_prompt_template | self.llm | StrOutputParser()
-
-    def _build_placeholder_rag_chain(self) -> Runnable:
-        async def prepare_rag_input(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            user = input_dict.get("user")
-            user_data_dict = await self._get_user_data_for_prompt(user)
-            return {
-                "input": input_dict.get("input", ""),
-                "context": "Placeholder context from base orchestrator.",
-                **user_data_dict,
-            }
-
-        return RunnableLambda(prepare_rag_input) | self.system_prompt_template | self.llm | StrOutputParser()
+    async def summarize_session(self, session_id: str, user_id: str) -> Tuple[Optional[str], int]:
+        """
+        Delegates session summarization to the RagOrchestrator.
+        """
+        logger.info(f"Orchestrator delegating summarization for session_id: {session_id}, user_id: {user_id}")
+        rag_orchestrator = self._get_rag_orchestrator()
+        summary, count = await rag_orchestrator.summarize_session(session_id=session_id, user_id=user_id)
+        return summary, count
 
 
-class RagOrchestrator(Orchestrator):
-    def __init__(self):
-        super().__init__()  # Calls Orchestrator.__init__ which loads prompts and keywords
+class RagOrchestrator:
+    """
+    Orchestrates Retrieval Augmented Generation (RAG) by combining multiple retrievers
+    and processing queries through an LLM.
+    """
+
+    def __init__(self, settings: Settings = Depends(get_settings)):
+        self.settings = settings
+        self.llm = ChatOpenAI(
+            model_name=settings.LLM_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            openai_api_key=settings.OPENAI_API_KEY,
+        )
+        self.reranker = FlashrankRerank()
+
         self.theory_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_THEORY)
         self.personal_plan_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_PERSONAL_PLAN)
         self.session_data_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_SESSION_DATA)
         self.future_me_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_FUTURE_ME)
         self.therapist_notes_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_THERAPIST_NOTES)
-        self.dfm_chat_history_summaries_db = DocumentProcessor(
-            namespace=self.settings.CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES
-        )
+        self.chat_summaries_db = DocumentProcessor(namespace=self.settings.CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES)
 
-        # Override crisis_chain and rag_chain for RagOrchestrator
-        self._crisis_chain = self._build_crisis_chain()  # RagOrchestrator's version
-        self._rag_chain = self._build_actual_rag_chain()
-        # Re-initialize the main chain with the overridden sub-chains
-        self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
+        self.system_prompt = self._load_prompt_template(self.settings.SYSTEM_PROMPT_FILE)
+        self.crisis_prompt = self._load_prompt_template(self.settings.CRISIS_PROMPT_FILE)
 
-        self.summarize_prompt_template = ChatPromptTemplate.from_template(
-            "Summarize the following session data concisely: {input}"
-        )
-        self.summarize_chain: Runnable = self.summarize_prompt_template | self.llm | StrOutputParser()
+        self.ensemble_retriever = self._get_combined_retriever()
+        self.rag_chain = self._build_rag_chain(self.system_prompt, self.ensemble_retriever)
+        self.crisis_chain = self._build_crisis_chain()
 
-    def _format_docs_for_context(self, docs: list[Document]) -> str:  # Renamed for clarity
-        return "\n\n".join(doc.page_content for doc in docs)
+    def _load_prompt_template(self, file_name: str) -> ChatPromptTemplate:
+        """Loads a prompt template from a file."""
+        file_path = os.path.join(self.settings.PROMPT_TEMPLATE_DIR, file_name)
+        logger.debug(f"Attempting to load prompt template from: {file_path}")
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                template_content = f.read()
+            return ChatPromptTemplate.from_template(template_content)
+        except FileNotFoundError:
+            logger.error(f"Prompt template file not found: {file_path}")
+            raise
+        except Exception as e:
+            logger.error(f"Error loading prompt template {file_path}: {e}")
+            raise
 
-    # Override _build_crisis_chain for RagOrchestrator to include RAG from personal_plan
-    def _build_crisis_chain(self) -> Runnable:
-        async def prepare_crisis_input_with_rag(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            user_query = input_dict.get("query", "")  # This is the user's crisis message
-            user = input_dict.get("user")
+    def _get_retriever_for_db(
+        self, doc_processor: DocumentProcessor, search_kwargs: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """Creates a retriever for a given DocumentProcessor with optional compression."""
+        base_retriever = doc_processor.vectordb.as_retriever(search_kwargs=search_kwargs or {"k": 5})
+        return base_retriever
 
-            user_data_dict = await self._get_user_data_for_prompt(user)  # Fetches safety plan, profile etc.
-
-            personal_plan_context_str = "No specific personal plan context retrieved for this query."
-            if user:  # Only query personal plan if user is identified
-                try:
-                    # Query personal_plan_db using the user's crisis message
-                    retrieved_plan_docs = self.personal_plan_db.query(
-                        query=user_query,
-                        k=3,  # Retrieve a few relevant chunks from personal plan
-                        # Add metadata filter if personal_plan docs are user-specific and tagged
-                        # metadata_filter={"user_id": str(user.id)} # Example if plans are user-specific
-                    )
-                    if retrieved_plan_docs:
-                        personal_plan_context_str = self._format_docs_for_context(retrieved_plan_docs)
-                        logging.info(
-                            f"Retrieved {len(retrieved_plan_docs)} docs from personal_plan for crisis context."
-                        )
-                    else:
-                        logging.info(f"No docs found in personal_plan for crisis query: '{user_query}'")
-                except Exception as e:
-                    logging.error(f"Error querying personal_plan_db for crisis: {e}")
-                    personal_plan_context_str = "Error retrieving personal plan context."
-
-            # Combine with other user data
-            final_crisis_input = {
-                "query": user_query,
-                "name": user_data_dict.get("name", "User"),
-                "gender_identity_pronouns": user_data_dict.get("gender_identity_pronouns", "not specified"),
-                "emotion_regulation_strengths": user_data_dict.get(
-                    "emotion_regulation_strengths", "Strengths not specified."
-                ),
-                "step_1_warning_signs": user_data_dict.get("step_1_warning_signs"),
-                "step_2_internal_coping": user_data_dict.get("step_2_internal_coping"),
-                "step_3_social_distractions": user_data_dict.get("step_3_social_distractions"),
-                "step_4_help_sources": user_data_dict.get("step_4_help_sources"),
-                "step_5_professional_resources": user_data_dict.get("step_5_professional_resources"),
-                "step_6_environment_risk_reduction": user_data_dict.get("step_6_environment_risk_reduction"),
-                "personal_plan_context": personal_plan_context_str,  # Add retrieved context
-            }
-            return final_crisis_input
-
-        return (
-            RunnableLambda(prepare_crisis_input_with_rag) | self.crisis_prompt_template | self.llm | StrOutputParser()
-        )
-
-    def _get_combined_retriever(self) -> BaseRetriever:
-        logging.info("Initializing combined retriever with EnsembleRetriever for multiple namespaces.")
-
-        retriever_k = 2
-
-        all_dbs = [
-            self.theory_db,
-            self.personal_plan_db,
-            self.session_data_db,
-            self.future_me_db,
-            self.therapist_notes_db,
-            self.dfm_chat_history_summaries_db,
+    def _get_combined_retriever(self, user_id: Optional[str] = None) -> EnsembleRetriever:
+        """
+        Creates an ensemble retriever combining various data sources.
+        Filters user-specific data if user_id is provided.
+        """
+        retrievers = [
+            self._get_retriever_for_db(self.theory_db, {"k": 3}),
         ]
+        weights = [0.6]
 
-        retrievers_list = [db.vectordb.as_retriever(search_kwargs={"k": retriever_k}) for db in all_dbs]
+        if user_id:
+            user_filter = {"user_id": user_id}
+            retrievers.extend(
+                [
+                    self._get_retriever_for_db(self.personal_plan_db, {"k": 2, "filter": user_filter}),
+                    self._get_retriever_for_db(self.session_data_db, {"k": 2, "filter": user_filter}),
+                    self._get_retriever_for_db(self.future_me_db, {"k": 1, "filter": user_filter}),
+                    self._get_retriever_for_db(self.therapist_notes_db, {"k": 1, "filter": user_filter}),
+                    self._get_retriever_for_db(self.chat_summaries_db, {"k": 1, "filter": user_filter}),
+                ]
+            )
+            weights.extend([0.1, 0.1, 0.05, 0.05, 0.1])
 
-        ensemble_retriever = EnsembleRetriever(retrievers=retrievers_list)
-        return ensemble_retriever
+        return EnsembleRetriever(retrievers=retrievers, weights=weights)
 
-    def _build_actual_rag_chain(self) -> Runnable:
-        retriever = self._get_combined_retriever()
+    def _format_docs(self, docs: List[Document]) -> str:
+        """Formats retrieved documents into a single string."""
+        if not docs:
+            return "No relevant information found in the knowledge base."
+        return "\n\n".join(
+            f"Source {i + 1} (ID: {doc.metadata.get('doc_id', 'N/A')}):\n{doc.page_content}"
+            for i, doc in enumerate(docs)
+        )
 
-        async def prepare_rag_input_with_retrieval_and_user_data(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            query = input_dict.get("input", "")  # This is the user's general message
-            user = input_dict.get("user")
-            retrieved_docs = await retriever.ainvoke(query)
-            formatted_docs = self._format_docs_for_context(retrieved_docs)  # Use helper
-            user_data_dict = await self._get_user_data_for_prompt(user)
-
-            final_rag_input = {
-                "input": query,
-                "context": formatted_docs,
-                **user_data_dict,
-            }
-            return final_rag_input
-
+    def _build_rag_chain(self, prompt: ChatPromptTemplate, retriever: EnsembleRetriever):
+        """Builds the RAG chain."""
         return (
-            RunnableLambda(prepare_rag_input_with_retrieval_and_user_data)
-            | self.system_prompt_template
+            {
+                "context": retriever | self._format_docs,
+                "question": RunnablePassthrough(),
+                "user_data": RunnablePassthrough(),
+            }
+            | prompt
             | self.llm
             | StrOutputParser()
         )
 
-    async def summarize_session(self, session_id: str) -> str:
-        logging.info(f"Attempting to summarize session data for session_id: '{session_id}'")
+    def _build_crisis_chain(self):
+        """Builds the RAG chain specifically for crisis situations, using personal plan."""
 
-        try:
-            session_docs: List[Document] = self.session_data_db.query(
-                query=f"session {session_id}",
-                k=50,
-                metadata_filter={"session_id": session_id},
+        def get_crisis_retriever(input_dict: Dict[str, Any]) -> List[Document]:
+            user_id = input_dict.get("user_id")
+            question = input_dict.get("question")  # The user's crisis message
+            if not user_id:
+                logger.warning("No user_id provided for crisis retriever, personal plan cannot be fetched.")
+                return []
+
+            personal_plan_retriever = self._get_retriever_for_db(
+                self.personal_plan_db, {"k": 3, "filter": {"user_id": user_id}}
             )
-        except Exception as e:
-            logging.error(f"Error querying session_data_db for session {session_id}: {e}")
-            return f"Summary for session {session_id} (unavailable due to data retrieval error)"
+            # Use invoke for synchronous retriever, or ainvoke if it's async
+            # Assuming _get_retriever_for_db returns a standard LangChain retriever
+            return personal_plan_retriever.invoke(question)
 
-        if not session_docs:
-            logging.warning(
-                f"No documents found for session_id: '{session_id}' in '{self.settings.CHROMA_NAMESPACE_SESSION_DATA}'. Cannot summarize."
-            )
-            return f"No data found to summarize for session {session_id}."
-
-        summary = await self._summarize_docs_with_chain(session_docs)
-        return summary
-
-    async def _summarize_docs_with_chain(self, docs: List[Document]) -> str:
-        if not docs:
-            return "No documents provided for summarization."
-        combined_text = self._format_docs_for_context(docs)  # Use helper
-
-        snippet_length = 500
-        text_snippet = combined_text[:snippet_length] + "..." if len(combined_text) > snippet_length else combined_text
-        logging.info(
-            f"Summarizing combined text of {len(docs)} documents (length: {len(combined_text)} chars). Snippet: '{text_snippet}'"
+        return (
+            {
+                # Pass the whole input_dict to get_crisis_retriever
+                "context": RunnablePassthrough() | get_crisis_retriever | self._format_docs,
+                "question": itemgetter("question"),
+                "user_data": itemgetter("user_data"),
+            }
+            | self.crisis_prompt
+            | self.llm
+            | StrOutputParser()
         )
 
+    async def answer(
+        self,
+        message: str,
+        user_id: Optional[str] = None,
+        user_data: Optional[UserData] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Answers a user's query using the RAG chain.
+        Includes user_id for context if available.
+        """
+        logger.info(
+            f"RagOrchestrator received message: '{message[:50]}...' for user_id: {user_id}, session_id: {session_id}"
+        )
+
+        current_retriever = self._get_combined_retriever(user_id=user_id)
+        current_rag_chain = self._build_rag_chain(self.system_prompt, current_retriever)
+
+        chain_input = {"question": message}
+        if user_data:
+            chain_input["user_data"] = user_data.model_dump()
+        else:
+            chain_input["user_data"] = {}
+
+        logger.debug(f"Invoking RAG chain with input: {chain_input}")
+        response_text = await current_rag_chain.ainvoke(chain_input)
+
+        return {"reply": response_text, "mode": "rag"}
+
+    async def handle_crisis_message(
+        self,
+        message: str,
+        user_id: Optional[str] = None,
+        user_data: Optional[UserData] = None,
+    ) -> Dict[str, Any]:
+        """Handles a crisis message using a specific crisis RAG chain."""
+        logger.info(f"Handling crisis message for user_id: {user_id}")
+
+        chain_input: Dict[str, Any] = {"question": message}
+        if user_id:
+            chain_input["user_id"] = user_id
+        if user_data:
+            chain_input["user_data"] = user_data.model_dump()
+        else:
+            chain_input["user_data"] = {}
+
+        logger.debug(f"Invoking crisis RAG chain with input: {chain_input}")
+        response_text = await self.crisis_chain.ainvoke(chain_input)
+
+        return {"reply": response_text, "mode": "crisis_rag"}
+
+    async def summarize_session(self, session_id: str, user_id: str) -> Tuple[Optional[str], int]:
+        """
+        Retrieves all documents for a given session_id and user_id from the
+        session_data_db, then summarizes them.
+        Returns the summary and the number of documents found.
+        """
+        logger.info(f"Summarizing session {session_id} for user {user_id}")
         try:
-            response = await self.summarize_chain.ainvoke({"input": combined_text})
-            summary = response
-            return cast(str, summary)
+            docs = self.session_data_db.query(
+                query="", k=1000, metadata_filter={"session_id": session_id, "user_id": user_id}
+            )
         except Exception as e:
-            logging.error(f"Error in _summarize_docs_with_chain: {e}")
-            return "Could not generate summary due to an internal error."
+            logger.error(f"Error querying session data for session {session_id}, user {user_id}: {e}")
+            raise HTTPException(status_code=500, detail="Error retrieving session data for summarization.")
+
+        if not docs:
+            logger.warning(f"No documents found for session {session_id}, user {user_id} to summarize.")
+            return None, 0
+
+        full_transcript = "\n".join([doc.page_content for doc in docs])
+
+        summarization_prompt_template = PromptTemplate.from_template(
+            "Summarize the following conversation transcript concisely:\n\nTranscript:\n{transcript}\n\nSummary:"
+        )
+
+        summarization_chain = summarization_prompt_template | self.llm | StrOutputParser()
+
+        try:
+            summary = await summarization_chain.ainvoke({"transcript": full_transcript})
+            logger.info(f"Successfully summarized {len(docs)} documents for session {session_id}, user {user_id}.")
+            return summary, len(docs)
+        except Exception as e:
+            logger.error(f"Error summarizing transcript for session {session_id}, user {user_id}: {e}")
+            raise HTTPException(status_code=500, detail="Error during transcript summarization.")
 
 
 async def get_orchestrator(request: Request) -> Orchestrator:
+    if not hasattr(request.app.state, "orchestrator_instance"):
+        logger.info("Creating new Orchestrator instance and storing in app.state")
+        settings = get_settings()
+        request.app.state.orchestrator_instance = Orchestrator(settings=settings)
+    return request.app.state.orchestrator_instance
+
+
+async def get_rag_orchestrator(request: Request) -> RagOrchestrator:
     if not hasattr(request.app.state, "rag_orchestrator_instance"):
-        logging.info("RagOrchestrator not found in app.state, initializing now.")
-        request.app.state.rag_orchestrator_instance = RagOrchestrator()
-        logging.info("RagOrchestrator initialized and attached to app.state as rag_orchestrator_instance")
+        logger.info("Creating new RagOrchestrator instance and storing in app.state")
+        settings = get_settings()
+        request.app.state.rag_orchestrator_instance = RagOrchestrator(settings=settings)
     return request.app.state.rag_orchestrator_instance

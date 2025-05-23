@@ -6,7 +6,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel  # For response model
 
-from app.api.orchestrator import RagOrchestrator, get_orchestrator
+from app.api.orchestrator import (  # Changed RagOrchestrator to Orchestrator
+    Orchestrator,
+    get_orchestrator,
+)
 from app.core.settings import get_settings  # To access namespace constants
 from app.rag.processor import DocumentProcessor
 
@@ -96,21 +99,25 @@ async def ingest_document(
 
 class SummarizeResponse(BaseModel):
     session_id: str
-    summary: str
+    summary: Optional[str]  # Summary can be None if no docs
+    documents_processed: int
 
 
 @router.post(
     "/session/{session_id}/summarize",
     status_code=status.HTTP_200_OK,
     response_model=SummarizeResponse,
+    # Added user_id as a required query parameter for summarization
 )
 async def finalize_session(
     session_id: str,
-    orchestrator: RagOrchestrator = Depends(get_orchestrator),
+    user_id: str,  # Make user_id explicit for summarization
+    orchestrator: Orchestrator = Depends(get_orchestrator),  # Correctly typed
 ):
     try:
-        summary = await orchestrator.summarize_session(session_id)
-        return SummarizeResponse(session_id=session_id, summary=summary)
+        # Orchestrator.summarize_session now returns a tuple (summary, count)
+        summary, count = await orchestrator.summarize_session(session_id=session_id, user_id=user_id)
+        return SummarizeResponse(session_id=session_id, summary=summary, documents_processed=count)
     except Exception as e:
         logging.exception(f"Error summarizing session {session_id}")
         raise HTTPException(
