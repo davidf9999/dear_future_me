@@ -9,7 +9,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
-from conftest import create_mock_settings
+from conftest import (
+    create_mock_settings,  # Ensure this provides TEST_CHROMA_NAMESPACE_PERSONAL_PLAN
+)
 from langchain.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
@@ -44,8 +46,8 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
 
     namespaces_to_mock = [
         cfg.CHROMA_NAMESPACE_THEORY,
-        cfg.CHROMA_NAMESPACE_PERSONAL_PLAN,
-        cfg.CHROMA_NAMESPACE_SESSION_DATA,  # Ensure session_data is mocked
+        cfg.CHROMA_NAMESPACE_PERSONAL_PLAN,  # Ensure this is mocked
+        cfg.CHROMA_NAMESPACE_SESSION_DATA,
         cfg.CHROMA_NAMESPACE_FUTURE_ME,
         cfg.CHROMA_NAMESPACE_THERAPIST_NOTES,
         cfg.CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES,
@@ -59,7 +61,6 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
         dp_mock.namespace = ns
         dp_mock.vectordb = MagicMock()
         dp_mock.vectordb.as_retriever = MagicMock(return_value=retriever_mock)
-        # Add a mock for the query method on DocumentProcessor
         dp_mock.query = MagicMock(return_value=[Document(page_content=f"Queried content from {ns}")])
 
         mock_document_processors_retrievers[ns] = {"dp_mock": dp_mock, "retriever_mock": retriever_mock}
@@ -96,44 +97,31 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
 
 @pytest.mark.asyncio
 async def test_summarize_session_retrieves_and_summarizes_data(monkeypatch: MonkeyPatch, mock_llm_and_chains: Any):
-    from app.api.orchestrator import cfg  # Get patched cfg
+    from app.api.orchestrator import cfg
 
     mock_llm, mock_dp_map = mock_llm_and_chains
-
-    # Get the mock DocumentProcessor for session_data
     session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
 
-    # Configure the mock DocumentProcessor.query for session_data
     session_id_to_test = "session123"
     mock_session_docs = [
         Document(page_content="First part of session 123."),
         Document(page_content="Second part of session 123, discussing future plans."),
     ]
     session_data_dp_mock.query.return_value = mock_session_docs
-
-    # Instantiate RagOrchestrator *after* DocumentProcessor is patched by mock_llm_and_chains
     orchestrator = RagOrchestrator()
-
-    # Replace the entire summarize_chain with an AsyncMock
-    mock_summarize_chain = AsyncMock(spec=Runnable)  # Use spec=Runnable for type safety
+    mock_summarize_chain = AsyncMock(spec=Runnable)
     mock_summarize_chain.ainvoke = AsyncMock(return_value="This is the summarized session content.")
-    orchestrator.summarize_chain = mock_summarize_chain  # Direct assignment
+    orchestrator.summarize_chain = mock_summarize_chain
 
-    # Call the method under test
     summary = await orchestrator.summarize_session(session_id_to_test)
 
-    # Assert that DocumentProcessor.query was called correctly for session_data
     session_data_dp_mock.query.assert_called_once_with(
-        query=f"session {session_id_to_test}",  # The query string used
-        k=50,  # The k value used in summarize_session
+        query=f"session {session_id_to_test}",
+        k=50,
         metadata_filter={"session_id": session_id_to_test},
     )
-
-    # Assert that the mock_summarize_chain's ainvoke was called with the combined content
     expected_combined_text = "First part of session 123.\n\nSecond part of session 123, discussing future plans."
     mock_summarize_chain.ainvoke.assert_called_once_with({"input": expected_combined_text})
-
-    # Assert the final summary
     assert summary == "This is the summarized session content."
 
 
@@ -143,22 +131,17 @@ async def test_summarize_session_no_docs_found(monkeypatch: MonkeyPatch, mock_ll
 
     _, mock_dp_map = mock_llm_and_chains
     session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
-    session_data_dp_mock.query.return_value = []  # Simulate no documents found
-
+    session_data_dp_mock.query.return_value = []
     orchestrator = RagOrchestrator()
-
-    # Replace the entire summarize_chain with an AsyncMock
     mock_summarize_chain = AsyncMock(spec=Runnable)
-    mock_summarize_chain.ainvoke = AsyncMock()  # Will be used to check it's not called
+    mock_summarize_chain.ainvoke = AsyncMock()
     orchestrator.summarize_chain = mock_summarize_chain
-
     session_id_to_test = "session_no_docs"
     summary = await orchestrator.summarize_session(session_id_to_test)
-
     session_data_dp_mock.query.assert_called_once_with(
         query=f"session {session_id_to_test}", k=50, metadata_filter={"session_id": session_id_to_test}
     )
-    mock_summarize_chain.ainvoke.assert_not_called()  # Summarization shouldn't be called if no docs
+    mock_summarize_chain.ainvoke.assert_not_called()
     assert summary == f"No data found to summarize for session {session_id_to_test}."
 
 
@@ -169,17 +152,12 @@ async def test_summarize_session_query_error(monkeypatch: MonkeyPatch, mock_llm_
     _, mock_dp_map = mock_llm_and_chains
     session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
     session_data_dp_mock.query.side_effect = Exception("Simulated DB query error")
-
     orchestrator = RagOrchestrator()
-
-    # Replace the entire summarize_chain with an AsyncMock
     mock_summarize_chain = AsyncMock(spec=Runnable)
     mock_summarize_chain.ainvoke = AsyncMock()
     orchestrator.summarize_chain = mock_summarize_chain
-
     session_id_to_test = "session_query_error"
     summary = await orchestrator.summarize_session(session_id_to_test)
-
     session_data_dp_mock.query.assert_called_once_with(
         query=f"session {session_id_to_test}", k=50, metadata_filter={"session_id": session_id_to_test}
     )
@@ -209,16 +187,12 @@ def test_rag_orchestrator_get_combined_retriever_uses_ensemble(mock_llm_and_chai
     from app.api.orchestrator import cfg
 
     orchestrator = RagOrchestrator()
-
     combined_retriever = orchestrator._get_combined_retriever()
-
     assert isinstance(combined_retriever, EnsembleRetriever), "Combined retriever should be an EnsembleRetriever"
-
     expected_num_retrievers = 6
     assert len(combined_retriever.retrievers) == expected_num_retrievers, (
         f"EnsembleRetriever should have {expected_num_retrievers} underlying retrievers"
     )
-
     _, mock_retriever_map = mock_llm_and_chains
     actual_ensemble_components = combined_retriever.retrievers
     expected_mocked_retrievers_in_ensemble = [
@@ -229,7 +203,6 @@ def test_rag_orchestrator_get_combined_retriever_uses_ensemble(mock_llm_and_chai
         mock_retriever_map[cfg.CHROMA_NAMESPACE_THERAPIST_NOTES]["retriever_mock"],
         mock_retriever_map[cfg.CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES]["retriever_mock"],
     ]
-
     for expected_mock_retriever in expected_mocked_retrievers_in_ensemble:
         assert any(expected_mock_retriever is component for component in actual_ensemble_components), (
             "Mock retriever for a namespace was not found in EnsembleRetriever components."
@@ -243,7 +216,6 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     from app.api.orchestrator import cfg
 
     mock_llm, mock_retriever_map = mock_llm_and_chains
-
     user_id = uuid.uuid4()
     mock_user = UserTable(
         id=user_id,
@@ -260,7 +232,6 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         gender_identity_pronouns="they/them",
         therapeutic_setting="online",
         emotion_regulation_strengths="Breathing",
-        # Add new fields for this test if they are part of the simplified prompt
         therapy_start_date=datetime.date(2023, 1, 1),
         dfm_use_integration_status="integrated",
         c_ssrs_status="low_risk",
@@ -276,7 +247,6 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         step_5_professional_resources="Hotline",
         step_6_environment_risk_reduction="Safe space",
     )
-
     mock_get_user_profile = AsyncMock(return_value=mock_profile_data)
     mock_get_safety_plan = AsyncMock(return_value=mock_safety_plan_data)
     monkeypatch.setattr("app.api.orchestrator.crud_profile.get_user_profile", mock_get_user_profile)
@@ -287,13 +257,12 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         yield db_session
 
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
-
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "Name: {name}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\n"
         "Strengths: {emotion_regulation_strengths}\n"
-        "Therapy Start Date: {therapy_start_date}\nDFM Integration: {dfm_use_integration_status}\n"  # Added
-        "C-SSRS: {c_ssrs_status}\nBDI-II: {bdi_ii_score}\nINQ: {inq_status}"  # Added
+        "Therapy Start Date: {therapy_start_date}\nDFM Integration: {dfm_use_integration_status}\n"
+        "C-SSRS: {c_ssrs_status}\nBDI-II: {bdi_ii_score}\nINQ: {inq_status}"
     )
     original_open_func = open
 
@@ -301,12 +270,13 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         if "system_prompt.md" in str(file_path):
             return mock_open(read_data=test_system_prompt_str)()
         elif "crisis_prompt.md" in str(file_path):
-            return mock_open(read_data="Crisis: {query} {name} {step_1_warning_signs}")()
+            return mock_open(
+                read_data="Crisis: {query} {name} {step_1_warning_signs} {personal_plan_context}"
+            )()  # Added personal_plan_context
         return original_open_func(file_path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", mock_open_side_effect)
     monkeypatch.setattr("app.api.orchestrator.os.path.exists", MagicMock(return_value=True))
-
     llm_call_args_list = []
     with patch.object(mock_llm, "ainvoke") as patched_llm_ainvoke:
 
@@ -315,22 +285,19 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
             return AIMessage(content="Mocked LLM Output for RAG path")
 
         patched_llm_ainvoke.side_effect = side_effect_for_llm_ainvoke
-
         orchestrator = RagOrchestrator()
         query_text = "Tell me about my future."
         await orchestrator.answer(query_text, user=mock_user)
-
     theory_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_THEORY]["retriever_mock"]
     future_me_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_FUTURE_ME]["retriever_mock"]
     personal_plan_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_PERSONAL_PLAN]["retriever_mock"]
-
     theory_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
     future_me_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
-    personal_plan_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
-
+    personal_plan_retriever_mock.ainvoke.assert_called_once_with(
+        query_text, ANY
+    )  # This is for ensemble, not crisis RAG
     assert patched_llm_ainvoke.call_count > 0, "LLM ainvoke was not called"
     final_prompt_to_llm = llm_call_args_list[-1]
-
     prompt_string_content = ""
     if hasattr(final_prompt_to_llm, "to_string"):
         prompt_string_content = final_prompt_to_llm.to_string()
@@ -338,11 +305,9 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         prompt_string_content = " ".join(
             [msg.content for msg in final_prompt_to_llm.messages if hasattr(msg, "content")]
         )
-
     assert f"Content from {cfg.CHROMA_NAMESPACE_THEORY}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_FUTURE_ME}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_PERSONAL_PLAN}" in prompt_string_content
-
     assert "Name: Rag Test User" in prompt_string_content
     assert "Persona: A hopeful future." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
@@ -383,7 +348,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         primary_emotional_themes="Sadness, Anxiety",
         therapist_language_to_mirror="It's okay to feel this way",
         user_emotional_tone_preference="Warm and understanding",
-        # New fields
         therapy_start_date=datetime.date(2022, 6, 15),
         dfm_use_integration_status="pending_discussion",
         c_ssrs_status="High Risk - Recent Attempt",
@@ -399,10 +363,8 @@ async def test_orchestrator_includes_user_data_in_prompt(
         step_5_professional_resources="Therapist number",
         step_6_environment_risk_reduction="Go for a walk",
     )
-
     mock_get_user_profile = AsyncMock(return_value=mock_profile_data)
     mock_get_safety_plan = AsyncMock(return_value=mock_safety_plan_data)
-
     monkeypatch.setattr("app.api.orchestrator.crud_profile.get_user_profile", mock_get_user_profile)
     monkeypatch.setattr("app.api.orchestrator.safety_plan_crud.get_safety_plan_by_user_id", mock_get_safety_plan)
 
@@ -411,7 +373,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         yield db_session
 
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
-
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "--- User Data ---\n"
@@ -420,11 +381,11 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "Future Persona: {future_me_persona_summary}\n"
         "Pronouns: {gender_identity_pronouns}\n"
         "Setting: {therapeutic_setting}\n"
-        "Therapy Start Date: {therapy_start_date}\n"  # Added
-        "DFM Integration: {dfm_use_integration_status}\n"  # Added
-        "C-SSRS: {c_ssrs_status}\n"  # Added
-        "BDI-II: {bdi_ii_score}\n"  # Added
-        "INQ: {inq_status}\n"  # Added
+        "Therapy Start Date: {therapy_start_date}\n"
+        "DFM Integration: {dfm_use_integration_status}\n"
+        "C-SSRS: {c_ssrs_status}\n"
+        "BDI-II: {bdi_ii_score}\n"
+        "INQ: {inq_status}\n"
         "Safety Plan Summary: {user_safety_plan_summary}\n"
         "Values: {identified_values}\n"
         "Tone: {tone_alignment}\n"
@@ -439,9 +400,9 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}.\n"
         "Warning Signs: {step_1_warning_signs}\nInternal Coping: {step_2_internal_coping}\n"
         "Social Distractions: {step_3_social_distractions}\nHelp Sources: {step_4_help_sources}\n"
-        "Professional Resources: {step_5_professional_resources}\nEnvironment Risk Reduction: {step_6_environment_risk_reduction}"
+        "Professional Resources: {step_5_professional_resources}\nEnvironment Risk Reduction: {step_6_environment_risk_reduction}\n"
+        "Personal Plan Context: {personal_plan_context}"  # Added placeholder
     )
-
     original_open_func = open
 
     def mock_open_side_effect(file_path, *args, **kwargs):
@@ -453,10 +414,8 @@ async def test_orchestrator_includes_user_data_in_prompt(
 
     monkeypatch.setattr("builtins.open", mock_open_side_effect)
     monkeypatch.setattr("app.api.orchestrator.os.path.exists", MagicMock(return_value=True))
-
     llm_call_args_list = []
     mock_llm_instance = mock_llm_and_chains[0]
-
     with patch.object(mock_llm_instance, "ainvoke") as patched_ainvoke:
 
         async def side_effect_for_ainvoke(prompt_input_arg, *args, **kwargs):
@@ -464,16 +423,12 @@ async def test_orchestrator_includes_user_data_in_prompt(
             return AIMessage(content="Mocked LLM Output via patch.object")
 
         patched_ainvoke.side_effect = side_effect_for_ainvoke
-
         orchestrator = RagOrchestrator()
         await orchestrator.answer("Hello, how are you?", user=mock_user)
-
     mock_get_user_profile.assert_called_once_with(db_session, user_id=user_id)
     mock_get_safety_plan.assert_called_once_with(db_session, user_id=user_id)
-
     assert patched_ainvoke.call_count > 0, "LLM ainvoke (patched) was not called"
     assert len(llm_call_args_list) > 0, "LLM call arguments were not captured by side_effect"
-
     final_prompt_to_llm = llm_call_args_list[-1]
     prompt_string_content = ""
     if hasattr(final_prompt_to_llm, "to_string"):
@@ -482,8 +437,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         prompt_string_content = " ".join(
             [msg.content for msg in final_prompt_to_llm.messages if hasattr(msg, "content")]
         )
-
-    # Assertions for user data from UserProfileTable
     assert "Name: Test User" in prompt_string_content
     assert "Future Persona: A resilient and kind individual." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
@@ -496,14 +449,11 @@ async def test_orchestrator_includes_user_data_in_prompt(
     assert "Themes: Sadness, Anxiety" in prompt_string_content
     assert "Mirror: It's okay to feel this way" in prompt_string_content
     assert "Preference: Warm and understanding" in prompt_string_content
-    # Assertions for new fields
     assert "Therapy Start Date: 2022-06-15" in prompt_string_content
     assert "DFM Integration: pending_discussion" in prompt_string_content
     assert "C-SSRS: High Risk - Recent Attempt" in prompt_string_content
     assert "BDI-II: 35 (Severe Depression)" in prompt_string_content
     assert "INQ: High (Significant Relationship Issues)" in prompt_string_content
-
-    # Assertions for constructed summaries
     assert (
         "Profile Summary: Name: Test User. Persona Summary: A resilient and kind individual." in prompt_string_content
     )
@@ -511,20 +461,22 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "Safety Plan Summary: Warning Signs: Feeling overwhelmed. Internal Coping Strategies: Deep breathing exercises."
         in prompt_string_content
     )
-
-    # Assertions for RAG context (will include content from mocked retrievers)
     assert f"Content from {cfg.CHROMA_NAMESPACE_THEORY}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_FUTURE_ME}" in prompt_string_content
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_strengths(
+async def test_rag_orchestrator_crisis_chain_uses_personal_plan_rag(
     monkeypatch: MonkeyPatch, mock_llm_and_chains: Any, db_session: AsyncSession
 ):
+    from app.api.orchestrator import cfg  # Get patched cfg
+
+    mock_llm, mock_dp_map = mock_llm_and_chains
+
     user_id = uuid.uuid4()
     mock_user = UserTable(
         id=user_id,
-        email="crisisuser@example.com",
+        email="crisisuser_rag@example.com",
         hashed_password="fake",
         is_active=True,
         is_verified=True,
@@ -532,19 +484,20 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
     )
     mock_profile_data = UserProfileTable(
         user_id=user_id,
-        name="Crisis User",
+        name="Crisis RAG User",
         gender_identity_pronouns="they/them",
-        emotion_regulation_strengths="Resilience, Reaching out",
+        emotion_regulation_strengths="Journaling",
     )
     mock_safety_plan_data = SafetyPlanTable(
         user_id=user_id,
         step_1_warning_signs="Feeling very down",
-        step_2_internal_coping="Listen to music",
-        step_3_social_distractions="Call Sam",
-        step_4_help_sources="Therapist Dr. X",
-        step_5_professional_resources="Hotline Y",
-        step_6_environment_risk_reduction="Remove Z",
+        step_2_internal_coping="Music",
     )
+
+    # Mock for personal_plan_db query
+    personal_plan_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_PERSONAL_PLAN]["dp_mock"]
+    mock_personal_plan_docs = [Document(page_content="Remember your core value of connection.")]
+    personal_plan_dp_mock.query.return_value = mock_personal_plan_docs
 
     monkeypatch.setattr("app.api.orchestrator.crud_profile.get_user_profile", AsyncMock(return_value=mock_profile_data))
     monkeypatch.setattr(
@@ -559,10 +512,10 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
 
     test_crisis_prompt_str_for_this_test = (
-        "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}.\n"
-        "Warning Signs: {step_1_warning_signs}\nInternal Coping: {step_2_internal_coping}\n"
-        "Social Distractions: {step_3_social_distractions}\nHelp Sources: {step_4_help_sources}\n"
-        "Professional Resources: {step_5_professional_resources}\nEnvironment Risk Reduction: {step_6_environment_risk_reduction}"
+        "CRISIS: {query} for user {name}.\n"
+        "Strengths: {emotion_regulation_strengths}.\n"
+        "Safety Plan Warning Signs: {step_1_warning_signs}.\n"
+        "Personal Plan Context: {personal_plan_context}"  # Simplified for focus
     )
     original_open_func = open
 
@@ -577,22 +530,26 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
     monkeypatch.setattr("app.api.orchestrator.os.path.exists", MagicMock(return_value=True))
 
     llm_call_args_list = []
-    mock_llm_instance = mock_llm_and_chains[0]
-
-    with patch.object(mock_llm_instance, "ainvoke") as patched_ainvoke:
+    with patch.object(mock_llm, "ainvoke") as patched_ainvoke:
 
         async def side_effect_for_ainvoke(prompt_input_arg, *args, **kwargs):
             llm_call_args_list.append(prompt_input_arg)
-            return AIMessage(content="Mocked Crisis LLM Output")
+            return AIMessage(content="Mocked Crisis LLM Output with RAG")
 
         patched_ainvoke.side_effect = side_effect_for_ainvoke
+        orchestrator = RagOrchestrator()  # Test RagOrchestrator's crisis chain
+        crisis_query = "I want to die"
+        await orchestrator.answer(crisis_query, user=mock_user)
 
-        orchestrator = RagOrchestrator()
-        await orchestrator.answer("I want to die", user=mock_user)
+    # Assert personal_plan_db.query was called
+    personal_plan_dp_mock.query.assert_called_once_with(
+        query=crisis_query,
+        k=3,
+        # metadata_filter={"user_id": str(user_id)} # Add if you implement user-specific plan filtering
+    )
 
     assert patched_ainvoke.call_count > 0, "LLM ainvoke (patched) was not called for crisis"
     assert len(llm_call_args_list) > 0, "LLM call arguments were not captured for crisis"
-
     crisis_prompt_to_llm = llm_call_args_list[0]
     prompt_string_content = ""
     if hasattr(crisis_prompt_to_llm, "to_string"):
@@ -601,13 +558,7 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
         prompt_string_content = " ".join(
             [msg.content for msg in crisis_prompt_to_llm.messages if hasattr(msg, "content")]
         )
-
-    assert "user Crisis User" in prompt_string_content
-    assert "Pronouns: they/them" in prompt_string_content
-    assert "Strengths: Resilience, Reaching out" in prompt_string_content
-    assert "Warning Signs: Feeling very down" in prompt_string_content
-    assert "Internal Coping: Listen to music" in prompt_string_content
-    assert "Social Distractions: Call Sam" in prompt_string_content
-    assert "Help Sources: Therapist Dr. X" in prompt_string_content
-    assert "Professional Resources: Hotline Y" in prompt_string_content
-    assert "Environment Risk Reduction: Remove Z" in prompt_string_content
+    assert "user Crisis RAG User" in prompt_string_content
+    assert "Strengths: Journaling" in prompt_string_content
+    assert "Safety Plan Warning Signs: Feeling very down" in prompt_string_content
+    assert "Personal Plan Context: Remember your core value of connection." in prompt_string_content

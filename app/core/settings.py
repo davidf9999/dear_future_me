@@ -1,11 +1,10 @@
 # /home/dfront/code/dear_future_me/app/core/settings.py
+# Full file content
 import os
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
-import chromadb.config
-from pydantic import EmailStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class LogLevel(str, Enum):
@@ -17,91 +16,100 @@ class LogLevel(str, Enum):
 
 
 class Settings(BaseSettings):
-    # --- Core Application Settings ---
-    APP_NAME: str = "Dear Future Me"
-    APP_VERSION: str = "0.1.0"
-    DEBUG_MODE: bool = False
+    PROJECT_NAME: str = "Dear Future Me"
+    PROJECT_VERSION: str = "0.1.0"
+    DESCRIPTION: str = "AI-powered mental wellness companion"
+    API_PREFIX: str = "/api/v1"
+
+    # General App Settings
+    DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
     LOG_LEVEL: LogLevel = LogLevel.INFO
-    # APP_DEFAULT_LANGUAGE: str = "en" # Removed language setting
+    RUN_ALEMBIC_ON_STARTUP: bool = os.getenv("RUN_ALEMBIC_ON_STARTUP", "true").lower() == "true"
 
-    # --- Database Settings ---
-    DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
-    DEBUG_SQL: bool = False
+    # Database settings
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+    DEBUG_SQL: bool = os.getenv("DEBUG_SQL", "false").lower() == "true"
+    # For asyncpg: "postgresql+asyncpg://user:password@host:port/dbname"
 
-    # --- Authentication & Security ---
-    SECRET_KEY: str = "a_very_secret_key_that_should_be_changed"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # JWT settings
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "a_very_secret_key_that_should_be_changed")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    DEMO_MODE: bool = True
-    DEMO_USER_EMAIL: EmailStr = "demo@example.com"
-    DEMO_USER_PASSWORD: str = "demopassword"
-    RUN_ALEMBIC_ON_STARTUP: bool = True
 
-    # --- LLM & RAG Settings ---
-    OPENAI_API_KEY: Optional[str] = None
+    # OpenAI settings
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "your_openai_api_key_here")
     LLM_MODEL: str = "gpt-3.5-turbo"
     LLM_TEMPERATURE: float = 0.7
-    MAX_MESSAGE_LENGTH: int = 1000
-    ASR_TIMEOUT_SECONDS: int = 60
+    EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    MAX_MESSAGE_LENGTH: int = 1000  # Restored based on error
+    ASR_TIMEOUT_SECONDS: int = 60  # Restored from old version
 
-    # --- ChromaDB RAG Namespaces ---
-    CHROMA_NAMESPACE_THEORY: str = "theory"
-    CHROMA_NAMESPACE_PERSONAL_PLAN: str = "personal_plan"
-    CHROMA_NAMESPACE_SESSION_DATA: str = "session_data"
-    CHROMA_NAMESPACE_FUTURE_ME: str = "future_me"
-    CHROMA_NAMESPACE_THERAPIST_NOTES: str = "therapist_notes"
+    # ChromaDB settings
+    CHROMA_HOST: str = os.getenv("CHROMA_HOST", "localhost")
+    CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
+    CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
+
+    # RAG Namespaces (Collections in ChromaDB)
+    CHROMA_NAMESPACE_THEORY: str = "dfm_theory"
+    CHROMA_NAMESPACE_PERSONAL_PLAN: str = "dfm_personal_plan"
+    CHROMA_NAMESPACE_SESSION_DATA: str = "dfm_session_data"
+    CHROMA_NAMESPACE_FUTURE_ME: str = "dfm_future_me"
+    CHROMA_NAMESPACE_THERAPIST_NOTES: str = "dfm_therapist_notes"
     CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES: str = "dfm_chat_history_summaries"
 
-    CHROMA_DIR: str = "./chroma_data"
-    CHROMA_HOST: Optional[str] = None
-    CHROMA_PORT: Optional[int] = None
-
-    # --- File Paths ---
+    # Prompt template settings
     PROMPT_TEMPLATE_DIR: str = "templates"
-    CRISIS_PROMPT_FILE: str = "crisis_prompt.md"
     SYSTEM_PROMPT_FILE: str = "system_prompt.md"
+    CRISIS_PROMPT_FILE: str = "crisis_prompt.md"
 
-    # --- API Ports ---
-    DFM_API_PORT: int = 8000
-    STREAMLIT_SERVER_PORT: int = 8501
+    # Crisis Keywords
+    CRISIS_KEYWORDS: List[str] = [
+        "die",
+        "kill myself",
+        "suicide",
+        "hopeless",
+        "end it all",
+        "ending my life",
+        "can't go on",
+        "no reason to live",
+    ]
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+    # CORS settings
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]  # Example origins
 
-    @property
-    def CHROMA_CLIENT_SETTINGS(self) -> chromadb.config.Settings:
-        chroma_dir_to_use = self.CHROMA_DIR
+    # Test settings (can be overridden by environment variables for testing)
+    TEST_DATABASE_URL: str = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///./test_override.db")
+    # Test RAG Namespaces
+    TEST_CHROMA_NAMESPACE_THEORY: str = "theory_test"
+    TEST_CHROMA_NAMESPACE_PERSONAL_PLAN: str = "personal_plan_test"
+    TEST_CHROMA_NAMESPACE_SESSION_DATA: str = "session_data_test"
+    TEST_CHROMA_NAMESPACE_FUTURE_ME: str = "future_me_test"
+    TEST_CHROMA_NAMESPACE_THERAPIST_NOTES: str = "therapist_notes_test"
+    TEST_CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES: str = "dfm_chat_history_summaries_test"
 
-        if self.CHROMA_HOST and self.CHROMA_PORT:
-            return chromadb.config.Settings(
-                chroma_api_impl="chromadb.api.fastapi.FastAPI",
-                chroma_server_host=self.CHROMA_HOST,
-                chroma_server_http_port=str(self.CHROMA_PORT),
-            )
-        else:
-            return chromadb.config.Settings(is_persistent=True, persist_directory=chroma_dir_to_use)
+    # Demo and other specific settings
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
+    DEMO_USER_EMAIL: Optional[str] = os.getenv("DEMO_USER_EMAIL", None)
+    DEMO_USER_PASSWORD: Optional[str] = os.getenv("DEMO_USER_PASSWORD", None)
+    APP_DEFAULT_LANGUAGE: str = os.getenv("APP_DEFAULT_LANGUAGE", "en")
+    SKIP_AUTH: bool = os.getenv("SKIP_AUTH", "false").lower() == "true"
+    STREAMLIT_DEBUG: bool = os.getenv("STREAMLIT_DEBUG", "false").lower() == "true"
+
+    class Config:
+        case_sensitive = True  # Changed from False in old model_config, adjust if needed
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        # To allow extra fields without validation errors, you could use:
+        # extra = "ignore"
+        # However, it's generally better to explicitly define all expected settings.
 
 
-_settings_instance: Optional[Settings] = None
+_settings_instance = None
 
 
 def get_settings() -> Settings:
     global _settings_instance
     if _settings_instance is None:
-        env_file_path = os.getenv("ENV_FILE", ".env")
-        if not os.path.exists(env_file_path) and env_file_path == ".env":
-            if os.path.exists(".env.example"):
-                env_file_path = ".env.example"
-                print(f"INFO: Default .env file not found. Using {env_file_path} as a fallback.")
-            else:
-                print("WARNING: Neither .env nor .env.example found. Using default settings values.")
-
-        current_model_config = Settings.model_config.copy()
-        current_model_config["env_file"] = env_file_path
-
-        _settings_instance = Settings(_model_config=current_model_config)
+        _settings_instance = Settings()
     return _settings_instance
