@@ -86,7 +86,8 @@ __pycache__/
 
 # sqlite DB, chroma RAG
 chroma_data/
-demo_data/
+RAG_demo_data/
+RDB_demo_data/
 data/
 
 .pids
