@@ -42,6 +42,8 @@ def create_mock_settings() -> Settings:
         CHROMA_NAMESPACE_FUTURE_ME="future_me_test_conftest",
         CHROMA_NAMESPACE_THERAPIST_NOTES="therapist_notes_test_conftest",
         CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES="dfm_chat_history_summaries_test_conftest",
+        CHROMA_HOST=None,  # Ensure tests use local Chroma
+        CHROMA_PORT=None,  # Ensure tests use local Chroma
         DATABASE_URL=os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///./test.db"),  # Ensure test DB is used
     )
     return mock_settings
