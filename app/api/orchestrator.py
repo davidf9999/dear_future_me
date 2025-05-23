@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, cast
 
 from fastapi import Request
 from langchain.prompts import ChatPromptTemplate
-from langchain.retrievers import EnsembleRetriever  # Added import
+from langchain.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
@@ -331,8 +331,6 @@ class RagOrchestrator(Orchestrator):
 
         retriever_k = 2  # Number of documents to fetch from each individual retriever
 
-        # List of all DocumentProcessor instances for RAG
-        # These are already initialized in __init__
         all_dbs = [
             self.theory_db,
             self.personal_plan_db,
@@ -344,18 +342,11 @@ class RagOrchestrator(Orchestrator):
 
         retrievers_list = [db.vectordb.as_retriever(search_kwargs={"k": retriever_k}) for db in all_dbs]
 
-        # For now, use equal weights. Weights can be tuned later if some sources are more important.
-        # Example: weights = [0.2, 0.2, 0.1, 0.2, 0.1, 0.2]
-        # Ensure the number of weights matches the number of retrievers if provided.
-
-        ensemble_retriever = EnsembleRetriever(
-            retrievers=retrievers_list
-            # weights=weights # Optional: add weights later if needed for ranking
-        )
+        ensemble_retriever = EnsembleRetriever(retrievers=retrievers_list)
         return ensemble_retriever
 
     def _build_actual_rag_chain(self) -> Runnable:
-        retriever = self._get_combined_retriever()  # This now returns the EnsembleRetriever
+        retriever = self._get_combined_retriever()
 
         def format_docs(docs: list[Document]) -> str:
             return "\n\n".join(doc.page_content for doc in docs)
@@ -363,14 +354,13 @@ class RagOrchestrator(Orchestrator):
         async def prepare_rag_input_with_retrieval_and_user_data(input_dict: Dict[str, Any]) -> Dict[str, Any]:
             query = input_dict.get("input", "")
             user = input_dict.get("user")
-            # The ensemble retriever is invoked here
             retrieved_docs = await retriever.ainvoke(query)
             formatted_docs = format_docs(retrieved_docs)
             user_data_dict = await self._get_user_data_for_prompt(user)
 
             final_rag_input = {
                 "input": query,
-                "context": formatted_docs,  # This context is for RAG, now from multiple sources
+                "context": formatted_docs,
                 **user_data_dict,
             }
             return final_rag_input
@@ -383,24 +373,46 @@ class RagOrchestrator(Orchestrator):
         )
 
     async def summarize_session(self, session_id: str) -> str:
-        logging.info(f"Attempting to summarize session data for: {session_id}")
-        # TODO: Actual implementation to fetch session data for summarization
-        text_to_summarize = (
-            f"Placeholder data for session {session_id}. User discussed future goals and coping strategies."
-        )
+        logging.info(f"Attempting to summarize session data for session_id: '{session_id}'")
+
+        # Retrieve documents from the session_data namespace using metadata filter
+        # Assuming documents in 'session_data' have 'session_id' in their metadata.
+        # We query for more documents (e.g., k=50) to get a good chunk of the session.
         try:
-            response = await self.summarize_chain.ainvoke({"input": text_to_summarize})
-            summary = response
-            return cast(str, summary)
+            session_docs: List[Document] = self.session_data_db.query(
+                query=f"session {session_id}",  # A generic query, filtering is key
+                k=50,  # Retrieve up to 50 chunks for the session
+                metadata_filter={"session_id": session_id},
+            )
         except Exception as e:
-            logging.error(f"Error summarizing session {session_id}: {e}")
-            return f"Summary for {session_id} (unavailable due to error)"
+            logging.error(f"Error querying session_data_db for session {session_id}: {e}")
+            return f"Summary for session {session_id} (unavailable due to data retrieval error)"
+
+        if not session_docs:
+            logging.warning(
+                f"No documents found for session_id: '{session_id}' in '{self.settings.CHROMA_NAMESPACE_SESSION_DATA}'. Cannot summarize."
+            )
+            return f"No data found to summarize for session {session_id}."
+
+        # Use the existing _summarize_docs_with_chain helper
+        summary = await self._summarize_docs_with_chain(session_docs)
+        return summary
 
     async def _summarize_docs_with_chain(self, docs: List[Document]) -> str:
         if not docs:
             return "No documents provided for summarization."
+        # The documents might be in chronological order from Chroma if IDs are structured that way,
+        # but it's not guaranteed. For summarization, the order of chunks might matter.
+        # For now, we'll combine them as retrieved.
         combined_text = "\n\n".join([doc.page_content for doc in docs])
-        logging.info(f"Summarizing combined text of {len(docs)} documents.")
+
+        # Log a snippet of the text being summarized for debugging
+        snippet_length = 500
+        text_snippet = combined_text[:snippet_length] + "..." if len(combined_text) > snippet_length else combined_text
+        logging.info(
+            f"Summarizing combined text of {len(docs)} documents (length: {len(combined_text)} chars). Snippet: '{text_snippet}'"
+        )
+
         try:
             response = await self.summarize_chain.ainvoke({"input": combined_text})
             summary = response

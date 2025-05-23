@@ -1,4 +1,6 @@
 # /home/dfront/code/dear_future_me/app/api/rag.py
+# Full file content
+import logging  # Added for logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
@@ -40,6 +42,7 @@ async def ingest_document(
     doc_id: str = Form(...),
     text: Optional[str] = Form(None),
     file: Optional[UploadFile] = None,
+    session_id: Optional[str] = Form(None),  # Added session_id
 ):
     if not text and not file:
         raise HTTPException(
@@ -65,15 +68,26 @@ async def ingest_document(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No content provided.")
 
     try:
-        proc = DocumentProcessor(namespace=namespace)  # Uses settings for Chroma client
-        proc.ingest(doc_id, raw_content, metadata={"namespace": namespace, "original_doc_id": doc_id})
+        proc = DocumentProcessor(namespace=namespace)
+
+        # Prepare metadata
+        doc_metadata = {"namespace": namespace, "original_doc_id": doc_id}
+        if namespace == settings.CHROMA_NAMESPACE_SESSION_DATA and session_id:
+            doc_metadata["session_id"] = session_id
+            logging.info(f"Ingesting into '{namespace}' with session_id: '{session_id}' for doc_id: '{doc_id}'")
+        elif namespace == settings.CHROMA_NAMESPACE_SESSION_DATA and not session_id:
+            logging.warning(
+                f"Ingesting into '{namespace}' (session_data) but no session_id provided for doc_id: '{doc_id}'. "
+                "Summarization for this session might not work correctly."
+            )
+
+        proc.ingest(doc_id, raw_content, metadata=doc_metadata)
+
         return IngestResponse(
             status="ok", namespace=namespace, doc_id=doc_id, message="Document ingested successfully."
         )
     except Exception as e:
-        # Log the exception for server-side debugging
-        # import logging
-        # logging.exception(f"Error during ingestion for namespace {namespace}, doc_id {doc_id}")
+        logging.exception(f"Error during ingestion for namespace {namespace}, doc_id {doc_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to ingest document: {e}",
@@ -88,7 +102,7 @@ class SummarizeResponse(BaseModel):
 @router.post(
     "/session/{session_id}/summarize",
     status_code=status.HTTP_200_OK,
-    response_model=SummarizeResponse,  # Use a specific response model
+    response_model=SummarizeResponse,
 )
 async def finalize_session(
     session_id: str,
@@ -98,8 +112,7 @@ async def finalize_session(
         summary = await orchestrator.summarize_session(session_id)
         return SummarizeResponse(session_id=session_id, summary=summary)
     except Exception as e:
-        # import logging
-        # logging.exception(f"Error summarizing session {session_id}")
+        logging.exception(f"Error summarizing session {session_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to summarize session: {e}",

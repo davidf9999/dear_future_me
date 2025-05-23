@@ -9,7 +9,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch  # Import 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from conftest import create_mock_settings
-from langchain.retrievers import EnsembleRetriever  # Added import
+from langchain.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 from langchain_core.retrievers import BaseRetriever
@@ -21,32 +21,22 @@ from app.api.orchestrator import RagOrchestrator
 from app.auth.models import SafetyPlanTable, UserProfileTable, UserTable
 from app.rag.processor import DocumentProcessor
 
-# Removed: from app.api.orchestrator import cfg as orchestrator_cfg_module
-# We will import cfg inside functions to ensure we get the patched version.
-
 
 @pytest.fixture(autouse=True)
 def mock_orchestrator_cfg_for_tests(monkeypatch: MonkeyPatch):
-    # Uses create_mock_settings from conftest.py which defines test namespaces
     default_mock_settings_for_module = create_mock_settings()
     monkeypatch.setattr("app.api.orchestrator.cfg", default_mock_settings_for_module)
     monkeypatch.setattr("app.rag.processor.cfg", default_mock_settings_for_module)
-    # This ensures that when app.api.orchestrator.cfg is imported or used,
-    # it gets this mocked version.
 
 
 @pytest.fixture
 def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_tests: Any):
-    # mock_orchestrator_cfg_for_tests fixture ensures cfg is patched before this runs
-    # Access the cfg that has been patched by mock_orchestrator_cfg_for_tests
-    from app.api.orchestrator import (
-        cfg as patched_orchestrator_cfg,  # Import here to get patched version
-    )
+    from app.api.orchestrator import cfg as patched_orchestrator_cfg
 
     cfg = patched_orchestrator_cfg
 
     mock_llm_instance = AsyncMock(spec=ChatOpenAI)
-    mock_llm_instance.ainvoke = AsyncMock()  # Default mock for LLM
+    mock_llm_instance.ainvoke = AsyncMock()
     monkeypatch.setattr("app.api.orchestrator.ChatOpenAI", lambda **kwargs: mock_llm_instance)
 
     mock_document_processors_retrievers = {}
@@ -54,7 +44,7 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
     namespaces_to_mock = [
         cfg.CHROMA_NAMESPACE_THEORY,
         cfg.CHROMA_NAMESPACE_PERSONAL_PLAN,
-        cfg.CHROMA_NAMESPACE_SESSION_DATA,
+        cfg.CHROMA_NAMESPACE_SESSION_DATA,  # Ensure session_data is mocked
         cfg.CHROMA_NAMESPACE_FUTURE_ME,
         cfg.CHROMA_NAMESPACE_THERAPIST_NOTES,
         cfg.CHROMA_NAMESPACE_DFM_CHAT_HISTORY_SUMMARIES,
@@ -62,13 +52,14 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
 
     for ns in namespaces_to_mock:
         retriever_mock = AsyncMock(spec=BaseRetriever)
-        # Each retriever returns a unique document for identification
         retriever_mock.ainvoke = AsyncMock(return_value=[Document(page_content=f"Content from {ns}")])
 
         dp_mock = MagicMock(spec=DocumentProcessor)
-        dp_mock.namespace = ns  # Store namespace for debugging
+        dp_mock.namespace = ns
         dp_mock.vectordb = MagicMock()
         dp_mock.vectordb.as_retriever = MagicMock(return_value=retriever_mock)
+        # Add a mock for the query method on DocumentProcessor
+        dp_mock.query = MagicMock(return_value=[Document(page_content=f"Queried content from {ns}")])
 
         mock_document_processors_retrievers[ns] = {"dp_mock": dp_mock, "retriever_mock": retriever_mock}
 
@@ -76,20 +67,21 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
         if namespace in mock_document_processors_retrievers:
             return mock_document_processors_retrievers[namespace]["dp_mock"]
 
-        # Fallback for any unexpected namespace during testing
-        # This helps if a new namespace is added to code but not yet to this mock setup
         logging.warning(
             f"Mock DocumentProcessor factory: Unmocked namespace '{namespace}' requested. Returning generic mock."
         )
         fallback_dp_mock = MagicMock(spec=DocumentProcessor)
-        fallback_dp_mock.namespace = namespace  # Ensure fallback also has namespace attribute
+        fallback_dp_mock.namespace = namespace
         fallback_dp_mock.vectordb = MagicMock()
         fallback_retriever = AsyncMock(spec=BaseRetriever)
         fallback_retriever.ainvoke = AsyncMock(
             return_value=[Document(page_content=f"Fallback content for {namespace}")]
         )
         fallback_dp_mock.vectordb.as_retriever = MagicMock(return_value=fallback_retriever)
-        # Store it too, so subsequent calls for the same unexpected namespace get the same mock
+        fallback_dp_mock.query = MagicMock(
+            return_value=[Document(page_content=f"Fallback queried content for {namespace}")]
+        )
+
         mock_document_processors_retrievers[namespace] = {
             "dp_mock": fallback_dp_mock,
             "retriever_mock": fallback_retriever,
@@ -102,23 +94,100 @@ def mock_llm_and_chains(monkeypatch: MonkeyPatch, mock_orchestrator_cfg_for_test
 
 
 @pytest.mark.asyncio
-async def test_summarize_session_fallback(monkeypatch: MonkeyPatch, mock_llm_and_chains: Any):
-    # mock_llm_and_chains fixture also sets up DocumentProcessor mocks, which is fine.
-    orch = RagOrchestrator()
+async def test_summarize_session_retrieves_and_summarizes_data(monkeypatch: MonkeyPatch, mock_llm_and_chains: Any):
+    from app.api.orchestrator import cfg  # Get patched cfg
 
-    mock_chain_itself = AsyncMock(spec=Runnable)
-    mock_chain_itself.ainvoke = AsyncMock(side_effect=RuntimeError("Simulated chain error"))
+    mock_llm, mock_dp_map = mock_llm_and_chains
 
-    monkeypatch.setattr(orch, "summarize_chain", mock_chain_itself)
-    # The session_id in the error message is not dynamically formatted from the input `session_id`
-    # in the current implementation of summarize_session's error handling.
-    # It uses a hardcoded placeholder string.
-    assert await orch.summarize_session("sessX") == "Summary for sessX (unavailable due to error)"
+    # Get the mock DocumentProcessor for session_data
+    session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
+
+    # Configure the mock DocumentProcessor.query for session_data
+    session_id_to_test = "session123"
+    mock_session_docs = [
+        Document(page_content="First part of session 123."),
+        Document(page_content="Second part of session 123, discussing future plans."),
+    ]
+    session_data_dp_mock.query.return_value = mock_session_docs
+
+    # Instantiate RagOrchestrator *after* DocumentProcessor is patched by mock_llm_and_chains
+    orchestrator = RagOrchestrator()
+
+    # Replace the entire summarize_chain with an AsyncMock
+    mock_summarize_chain = AsyncMock(spec=Runnable)  # Use spec=Runnable for type safety
+    mock_summarize_chain.ainvoke = AsyncMock(return_value="This is the summarized session content.")
+    orchestrator.summarize_chain = mock_summarize_chain  # Direct assignment
+
+    # Call the method under test
+    summary = await orchestrator.summarize_session(session_id_to_test)
+
+    # Assert that DocumentProcessor.query was called correctly for session_data
+    session_data_dp_mock.query.assert_called_once_with(
+        query=f"session {session_id_to_test}",  # The query string used
+        k=50,  # The k value used in summarize_session
+        metadata_filter={"session_id": session_id_to_test},
+    )
+
+    # Assert that the mock_summarize_chain's ainvoke was called with the combined content
+    expected_combined_text = "First part of session 123.\n\nSecond part of session 123, discussing future plans."
+    mock_summarize_chain.ainvoke.assert_called_once_with({"input": expected_combined_text})
+
+    # Assert the final summary
+    assert summary == "This is the summarized session content."
+
+
+@pytest.mark.asyncio
+async def test_summarize_session_no_docs_found(monkeypatch: MonkeyPatch, mock_llm_and_chains: Any):
+    from app.api.orchestrator import cfg
+
+    _, mock_dp_map = mock_llm_and_chains
+    session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
+    session_data_dp_mock.query.return_value = []  # Simulate no documents found
+
+    orchestrator = RagOrchestrator()
+
+    # Replace the entire summarize_chain with an AsyncMock
+    mock_summarize_chain = AsyncMock(spec=Runnable)
+    mock_summarize_chain.ainvoke = AsyncMock()  # Will be used to check it's not called
+    orchestrator.summarize_chain = mock_summarize_chain
+
+    session_id_to_test = "session_no_docs"
+    summary = await orchestrator.summarize_session(session_id_to_test)
+
+    session_data_dp_mock.query.assert_called_once_with(
+        query=f"session {session_id_to_test}", k=50, metadata_filter={"session_id": session_id_to_test}
+    )
+    mock_summarize_chain.ainvoke.assert_not_called()  # Summarization shouldn't be called if no docs
+    assert summary == f"No data found to summarize for session {session_id_to_test}."
+
+
+@pytest.mark.asyncio
+async def test_summarize_session_query_error(monkeypatch: MonkeyPatch, mock_llm_and_chains: Any):
+    from app.api.orchestrator import cfg
+
+    _, mock_dp_map = mock_llm_and_chains
+    session_data_dp_mock = mock_dp_map[cfg.CHROMA_NAMESPACE_SESSION_DATA]["dp_mock"]
+    session_data_dp_mock.query.side_effect = Exception("Simulated DB query error")
+
+    orchestrator = RagOrchestrator()
+
+    # Replace the entire summarize_chain with an AsyncMock
+    mock_summarize_chain = AsyncMock(spec=Runnable)
+    mock_summarize_chain.ainvoke = AsyncMock()
+    orchestrator.summarize_chain = mock_summarize_chain
+
+    session_id_to_test = "session_query_error"
+    summary = await orchestrator.summarize_session(session_id_to_test)
+
+    session_data_dp_mock.query.assert_called_once_with(
+        query=f"session {session_id_to_test}", k=50, metadata_filter={"session_id": session_id_to_test}
+    )
+    mock_summarize_chain.ainvoke.assert_not_called()
+    assert "unavailable due to data retrieval error" in summary
 
 
 def test_rag_orchestrator_has_all_dbs(mock_llm_and_chains: Any):
-    # mock_llm_and_chains ensures DocumentProcessors are mocked when RagOrchestrator is instantiated.
-    from app.api.orchestrator import cfg  # Import here to get patched version
+    from app.api.orchestrator import cfg
 
     orch = RagOrchestrator()
     assert hasattr(orch, "theory_db") and orch.theory_db.namespace == cfg.CHROMA_NAMESPACE_THEORY
@@ -135,11 +204,8 @@ def test_rag_orchestrator_has_all_dbs(mock_llm_and_chains: Any):
     )
 
 
-# New test for _get_combined_retriever
 def test_rag_orchestrator_get_combined_retriever_uses_ensemble(mock_llm_and_chains: Any):
-    # mock_llm_and_chains has patched DocumentProcessor.
-    # RagOrchestrator instantiation will use the mocked DocumentProcessor factory.
-    from app.api.orchestrator import cfg  # Import here to get patched version
+    from app.api.orchestrator import cfg
 
     orchestrator = RagOrchestrator()
 
@@ -147,19 +213,13 @@ def test_rag_orchestrator_get_combined_retriever_uses_ensemble(mock_llm_and_chai
 
     assert isinstance(combined_retriever, EnsembleRetriever), "Combined retriever should be an EnsembleRetriever"
 
-    # Based on the 6 namespaces initialized in RagOrchestrator
     expected_num_retrievers = 6
     assert len(combined_retriever.retrievers) == expected_num_retrievers, (
         f"EnsembleRetriever should have {expected_num_retrievers} underlying retrievers"
     )
 
-    # Check if the underlying retrievers are the mocked ones
     _, mock_retriever_map = mock_llm_and_chains
-
-    # Get the actual retriever objects from the EnsembleRetriever
     actual_ensemble_components = combined_retriever.retrievers
-
-    # Get the mocked retriever objects we expect to be in the ensemble
     expected_mocked_retrievers_in_ensemble = [
         mock_retriever_map[cfg.CHROMA_NAMESPACE_THEORY]["retriever_mock"],
         mock_retriever_map[cfg.CHROMA_NAMESPACE_PERSONAL_PLAN]["retriever_mock"],
@@ -179,7 +239,7 @@ def test_rag_orchestrator_get_combined_retriever_uses_ensemble(mock_llm_and_chai
 async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     monkeypatch: MonkeyPatch, mock_llm_and_chains: Any, db_session: AsyncSession
 ):
-    from app.api.orchestrator import cfg  # Import here to get patched version
+    from app.api.orchestrator import cfg
 
     mock_llm, mock_retriever_map = mock_llm_and_chains
 
@@ -224,16 +284,16 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "Name: {name}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\n"
-        "Strengths: {emotion_regulation_strengths}"  # Simplified for test focus
+        "Strengths: {emotion_regulation_strengths}"
     )
-    original_open_func = open  # Save original open
+    original_open_func = open
 
     def mock_open_side_effect(file_path, *args, **kwargs):
         if "system_prompt.md" in str(file_path):
             return mock_open(read_data=test_system_prompt_str)()
-        elif "crisis_prompt.md" in str(file_path):  # Still mock crisis for completeness
+        elif "crisis_prompt.md" in str(file_path):
             return mock_open(read_data="Crisis: {query} {name} {step_1_warning_signs}")()
-        return original_open_func(file_path, *args, **kwargs)  # Use saved original
+        return original_open_func(file_path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", mock_open_side_effect)
     monkeypatch.setattr("app.api.orchestrator.os.path.exists", MagicMock(return_value=True))
@@ -251,17 +311,13 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         query_text = "Tell me about my future."
         await orchestrator.answer(query_text, user=mock_user)
 
-    # Assert that the individual (mocked) retrievers were called by the EnsembleRetriever
     theory_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_THEORY]["retriever_mock"]
     future_me_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_FUTURE_ME]["retriever_mock"]
     personal_plan_retriever_mock = mock_retriever_map[cfg.CHROMA_NAMESPACE_PERSONAL_PLAN]["retriever_mock"]
 
-    # EnsembleRetriever calls ainvoke on its components.
-    # The second argument is typically a RunnableConfig object.
     theory_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
     future_me_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
     personal_plan_retriever_mock.ainvoke.assert_called_once_with(query_text, ANY)
-    # ... can add more for other retrievers if specific interactions are expected for all
 
     assert patched_llm_ainvoke.call_count > 0, "LLM ainvoke was not called"
     final_prompt_to_llm = llm_call_args_list[-1]
@@ -269,17 +325,15 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     prompt_string_content = ""
     if hasattr(final_prompt_to_llm, "to_string"):
         prompt_string_content = final_prompt_to_llm.to_string()
-    elif hasattr(final_prompt_to_llm, "messages"):  # For ChatPromptValue
+    elif hasattr(final_prompt_to_llm, "messages"):
         prompt_string_content = " ".join(
             [msg.content for msg in final_prompt_to_llm.messages if hasattr(msg, "content")]
         )
 
-    # Check that context contains content from multiple mocked sources
     assert f"Content from {cfg.CHROMA_NAMESPACE_THEORY}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_FUTURE_ME}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_PERSONAL_PLAN}" in prompt_string_content
 
-    # Check for user data as well
     assert "Name: Rag Test User" in prompt_string_content
     assert "Persona: A hopeful future." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
@@ -290,11 +344,7 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
 async def test_orchestrator_includes_user_data_in_prompt(
     monkeypatch: MonkeyPatch, mock_llm_and_chains: Any, db_session: AsyncSession
 ):
-    # This test can remain largely as is, focusing on user data injection.
-    # The mock_llm_and_chains fixture now provides more granular retriever mocks,
-    # but the core logic of this test (checking user profile data in prompt) is still valid.
-    # The context part will now also include RAG data due to the EnsembleRetriever.
-    from app.api.orchestrator import cfg  # Import here to get patched version
+    from app.api.orchestrator import cfg
 
     user_id = uuid.uuid4()
     mock_user = UserTable(
@@ -305,7 +355,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         is_superuser=False,
         hashed_password="fake",
     )
-
     mock_profile_data = UserProfileTable(
         user_id=user_id,
         name="Test User",
@@ -313,7 +362,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
         gender_identity_pronouns="they/them",
         therapeutic_setting="online chat",
         emotion_regulation_strengths="Journaling, mindful breathing",
-        # Added fields to match system_prompt.md and UserProfileTable
         identified_values="Connection, Growth",
         tone_alignment="Gentle",
         self_reported_goals="Feel more hopeful",
@@ -344,22 +392,15 @@ async def test_orchestrator_includes_user_data_in_prompt(
 
     monkeypatch.setattr("app.api.orchestrator.get_async_session_context", mock_get_session_context)
 
-    # Use the full system prompt string from orchestrator's defaults for accuracy
-    # or load from file if that's preferred for test setup.
-    # For this test, let's assume the loaded prompt from file is used by RagOrchestrator.
-    # The mock_open_side_effect will provide the content.
-
-    # Using a simplified prompt string for this test to focus on user data fields
-    # The actual prompt template is more complex.
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "--- User Data ---\n"
         "Name: {name}\n"
-        "Profile Summary: {user_profile_summary}\n"  # This is constructed in _get_user_data_for_prompt
+        "Profile Summary: {user_profile_summary}\n"
         "Future Persona: {future_me_persona_summary}\n"
         "Pronouns: {gender_identity_pronouns}\n"
         "Setting: {therapeutic_setting}\n"
-        "Safety Plan Summary: {user_safety_plan_summary}\n"  # This is constructed
+        "Safety Plan Summary: {user_safety_plan_summary}\n"
         "Values: {identified_values}\n"
         "Tone: {tone_alignment}\n"
         "Goals: {self_reported_goals}\n"
@@ -369,7 +410,7 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "Mirror: {therapist_language_to_mirror}\n"
         "Preference: {user_emotional_tone_preference}"
     )
-    test_crisis_prompt_str = (  # Keep crisis prompt mock for completeness
+    test_crisis_prompt_str = (
         "CRISIS: {query} for user {name}. Pronouns: {gender_identity_pronouns}. Strengths: {emotion_regulation_strengths}.\n"
         "Warning Signs: {step_1_warning_signs}\nInternal Coping: {step_2_internal_coping}\n"
         "Social Distractions: {step_3_social_distractions}\nHelp Sources: {step_4_help_sources}\n"
@@ -380,10 +421,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
 
     def mock_open_side_effect(file_path, *args, **kwargs):
         if "system_prompt.md" in str(file_path):
-            # For this test, we can use the actual template content if available
-            # or the simplified one above. Let's use a simplified one to ensure all fields are checked.
-            # If using actual template, ensure it has all these placeholders.
-            # For now, using the test_system_prompt_str defined above.
             return mock_open(read_data=test_system_prompt_str)()
         elif "crisis_prompt.md" in str(file_path):
             return mock_open(read_data=test_crisis_prompt_str)()
@@ -421,7 +458,6 @@ async def test_orchestrator_includes_user_data_in_prompt(
             [msg.content for msg in final_prompt_to_llm.messages if hasattr(msg, "content")]
         )
 
-    # Assertions for user data from UserProfileTable
     assert "Name: Test User" in prompt_string_content
     assert "Future Persona: A resilient and kind individual." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
@@ -435,18 +471,14 @@ async def test_orchestrator_includes_user_data_in_prompt(
     assert "Mirror: It's okay to feel this way" in prompt_string_content
     assert "Preference: Warm and understanding" in prompt_string_content
 
-    # Assertions for constructed summaries
-    # user_profile_summary is "Name: Test User. Persona Summary: A resilient and kind individual."
     assert (
         "Profile Summary: Name: Test User. Persona Summary: A resilient and kind individual." in prompt_string_content
     )
-    # user_safety_plan_summary is "Warning Signs: Feeling overwhelmed. Internal Coping Strategies: Deep breathing exercises."
     assert (
         "Safety Plan Summary: Warning Signs: Feeling overwhelmed. Internal Coping Strategies: Deep breathing exercises."
         in prompt_string_content
     )
 
-    # Assertions for RAG context (will include content from mocked retrievers)
     assert f"Content from {cfg.CHROMA_NAMESPACE_THEORY}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_FUTURE_ME}" in prompt_string_content
 
@@ -503,7 +535,7 @@ async def test_orchestrator_crisis_prompt_includes_safety_plan_context_and_stren
     def mock_open_crisis_test(file_path, *args, **kwargs):
         if "crisis_prompt.md" in str(file_path):
             return mock_open(read_data=test_crisis_prompt_str_for_this_test)()
-        elif "system_prompt.md" in str(file_path):  # Mock system prompt as well for completeness
+        elif "system_prompt.md" in str(file_path):
             return mock_open(read_data="System prompt: {input} {context} {name}")()
         return original_open_func(file_path, *args, **kwargs)
 
