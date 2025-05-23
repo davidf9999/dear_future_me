@@ -1,10 +1,11 @@
 # /home/dfront/code/dear_future_me/tests/test_orchestrator.py
 # Full file content
+import datetime  # Added for date
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch  # Import ANY
+from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -259,6 +260,12 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
         gender_identity_pronouns="they/them",
         therapeutic_setting="online",
         emotion_regulation_strengths="Breathing",
+        # Add new fields for this test if they are part of the simplified prompt
+        therapy_start_date=datetime.date(2023, 1, 1),
+        dfm_use_integration_status="integrated",
+        c_ssrs_status="low_risk",
+        bdi_ii_score="10",
+        inq_status="moderate",
     )
     mock_safety_plan_data = SafetyPlanTable(
         user_id=user_id,
@@ -284,7 +291,9 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     test_system_prompt_str = (
         "System Context: {context}\nUser Input: {input}\n"
         "Name: {name}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\n"
-        "Strengths: {emotion_regulation_strengths}"
+        "Strengths: {emotion_regulation_strengths}\n"
+        "Therapy Start Date: {therapy_start_date}\nDFM Integration: {dfm_use_integration_status}\n"  # Added
+        "C-SSRS: {c_ssrs_status}\nBDI-II: {bdi_ii_score}\nINQ: {inq_status}"  # Added
     )
     original_open_func = open
 
@@ -338,6 +347,11 @@ async def test_orchestrator_rag_path_uses_ensemble_retriever_and_formats_docs(
     assert "Persona: A hopeful future." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
     assert "Strengths: Breathing" in prompt_string_content
+    assert "Therapy Start Date: 2023-01-01" in prompt_string_content
+    assert "DFM Integration: integrated" in prompt_string_content
+    assert "C-SSRS: low_risk" in prompt_string_content
+    assert "BDI-II: 10" in prompt_string_content
+    assert "INQ: moderate" in prompt_string_content
 
 
 @pytest.mark.asyncio
@@ -369,6 +383,12 @@ async def test_orchestrator_includes_user_data_in_prompt(
         primary_emotional_themes="Sadness, Anxiety",
         therapist_language_to_mirror="It's okay to feel this way",
         user_emotional_tone_preference="Warm and understanding",
+        # New fields
+        therapy_start_date=datetime.date(2022, 6, 15),
+        dfm_use_integration_status="pending_discussion",
+        c_ssrs_status="High Risk - Recent Attempt",
+        bdi_ii_score="35 (Severe Depression)",
+        inq_status="High (Significant Relationship Issues)",
     )
     mock_safety_plan_data = SafetyPlanTable(
         user_id=user_id,
@@ -400,6 +420,11 @@ async def test_orchestrator_includes_user_data_in_prompt(
         "Future Persona: {future_me_persona_summary}\n"
         "Pronouns: {gender_identity_pronouns}\n"
         "Setting: {therapeutic_setting}\n"
+        "Therapy Start Date: {therapy_start_date}\n"  # Added
+        "DFM Integration: {dfm_use_integration_status}\n"  # Added
+        "C-SSRS: {c_ssrs_status}\n"  # Added
+        "BDI-II: {bdi_ii_score}\n"  # Added
+        "INQ: {inq_status}\n"  # Added
         "Safety Plan Summary: {user_safety_plan_summary}\n"
         "Values: {identified_values}\n"
         "Tone: {tone_alignment}\n"
@@ -458,6 +483,7 @@ async def test_orchestrator_includes_user_data_in_prompt(
             [msg.content for msg in final_prompt_to_llm.messages if hasattr(msg, "content")]
         )
 
+    # Assertions for user data from UserProfileTable
     assert "Name: Test User" in prompt_string_content
     assert "Future Persona: A resilient and kind individual." in prompt_string_content
     assert "Pronouns: they/them" in prompt_string_content
@@ -470,7 +496,14 @@ async def test_orchestrator_includes_user_data_in_prompt(
     assert "Themes: Sadness, Anxiety" in prompt_string_content
     assert "Mirror: It's okay to feel this way" in prompt_string_content
     assert "Preference: Warm and understanding" in prompt_string_content
+    # Assertions for new fields
+    assert "Therapy Start Date: 2022-06-15" in prompt_string_content
+    assert "DFM Integration: pending_discussion" in prompt_string_content
+    assert "C-SSRS: High Risk - Recent Attempt" in prompt_string_content
+    assert "BDI-II: 35 (Severe Depression)" in prompt_string_content
+    assert "INQ: High (Significant Relationship Issues)" in prompt_string_content
 
+    # Assertions for constructed summaries
     assert (
         "Profile Summary: Name: Test User. Persona Summary: A resilient and kind individual." in prompt_string_content
     )
@@ -479,6 +512,7 @@ async def test_orchestrator_includes_user_data_in_prompt(
         in prompt_string_content
     )
 
+    # Assertions for RAG context (will include content from mocked retrievers)
     assert f"Content from {cfg.CHROMA_NAMESPACE_THEORY}" in prompt_string_content
     assert f"Content from {cfg.CHROMA_NAMESPACE_FUTURE_ME}" in prompt_string_content
 

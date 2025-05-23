@@ -86,11 +86,10 @@ class Orchestrator:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         template_dir = os.path.join(base_dir, self.settings.PROMPT_TEMPLATE_DIR)
 
-        # Default crisis prompt now includes individual step_X placeholders
         default_crisis_prompt_str = (
             "You are a crisis responder. User query: {query}\n"
             "User Profile: Name: {name}, Pronouns: {gender_identity_pronouns}, Strengths: {emotion_regulation_strengths}.\n"
-            "Safety Plan Details:\n"  # Added labels for clarity
+            "Safety Plan Details:\n"
             "Warning Signs: {step_1_warning_signs}\n"
             "Internal Coping Strategies: {step_2_internal_coping}\n"
             "Social Distractions: {step_3_social_distractions}\n"
@@ -99,9 +98,11 @@ class Orchestrator:
             "Environment Risk Reduction: {step_6_environment_risk_reduction}"
         )
         default_system_prompt_str = (
-            "Based on the following context: {context}\n\nUser Input: {input}\n\n"  # Added labels for clarity
+            "Based on the following context: {context}\n\nUser Input: {input}\n\n"
             "User Profile:\nName: {name}\nSummary: {user_profile_summary}\nPersona: {future_me_persona_summary}\nPronouns: {gender_identity_pronouns}\nTherapeutic Setting: {therapeutic_setting}.\n"
-            "Safety Plan Summary: {user_safety_plan_summary}.\n"  # This is a summary, not individual steps
+            "Therapy Start Date: {therapy_start_date}.\nDFM Use Integration Status: {dfm_use_integration_status}.\n"  # Added
+            "C-SSRS Status: {c_ssrs_status}.\nBDI-II Score: {bdi_ii_score}.\nINQ Status: {inq_status}.\n"  # Added
+            "Safety Plan Summary: {user_safety_plan_summary}.\n"
             "Identified Values: {identified_values}.\n"
             "Tone Alignment: {tone_alignment}.\n"
             "Self-Reported Goals: {self_reported_goals}.\n"
@@ -170,6 +171,12 @@ class Orchestrator:
             "therapist_language_to_mirror": "Therapist language to mirror not specified.",
             "user_emotional_tone_preference": "User emotional tone preference not specified.",
             "user_safety_plan_summary": "User safety plan summary not available.",
+            # New fields with defaults
+            "therapy_start_date": "Not available.",
+            "dfm_use_integration_status": "Not available.",
+            "c_ssrs_status": "Not available.",
+            "bdi_ii_score": "Not available.",
+            "inq_status": "Not available.",
             # Placeholders for individual safety plan steps
             "step_1_warning_signs": "Not specified.",
             "step_2_internal_coping": "Not specified.",
@@ -226,6 +233,18 @@ class Orchestrator:
                             getattr(profile, "user_emotional_tone_preference", None)
                             or user_data["user_emotional_tone_preference"]
                         )
+                        # Populate new fields
+                        user_data["therapy_start_date"] = (
+                            str(profile.therapy_start_date)
+                            if profile.therapy_start_date
+                            else user_data["therapy_start_date"]
+                        )
+                        user_data["dfm_use_integration_status"] = (
+                            profile.dfm_use_integration_status or user_data["dfm_use_integration_status"]
+                        )
+                        user_data["c_ssrs_status"] = profile.c_ssrs_status or user_data["c_ssrs_status"]
+                        user_data["bdi_ii_score"] = profile.bdi_ii_score or user_data["bdi_ii_score"]
+                        user_data["inq_status"] = profile.inq_status or user_data["inq_status"]
 
                         if profile_parts:
                             user_data["user_profile_summary"] = " ".join(profile_parts)
@@ -272,7 +291,6 @@ class Orchestrator:
             user = input_dict.get("user")
             user_data_dict = await self._get_user_data_for_prompt(user)
 
-            # Crisis prompt now expects individual step_X fields
             return_dict = {
                 "query": input_dict.get("query", ""),
                 "name": user_data_dict.get("name", "User"),
@@ -280,7 +298,6 @@ class Orchestrator:
                 "emotion_regulation_strengths": user_data_dict.get(
                     "emotion_regulation_strengths", "Strengths not specified."
                 ),
-                # Pass individual safety plan steps
                 "step_1_warning_signs": user_data_dict.get("step_1_warning_signs"),
                 "step_2_internal_coping": user_data_dict.get("step_2_internal_coping"),
                 "step_3_social_distractions": user_data_dict.get("step_3_social_distractions"),
@@ -298,7 +315,7 @@ class Orchestrator:
             user_data_dict = await self._get_user_data_for_prompt(user)
             return {
                 "input": input_dict.get("input", ""),
-                "context": "Placeholder context from base orchestrator.",  # This context is for RAG
+                "context": "Placeholder context from base orchestrator.",
                 **user_data_dict,
             }
 
@@ -318,7 +335,7 @@ class RagOrchestrator(Orchestrator):
         )
 
         self._crisis_chain = self._build_crisis_chain()
-        self._rag_chain = self._build_actual_rag_chain()  # This will now use the combined retriever
+        self._rag_chain = self._build_actual_rag_chain()
         self.chain = BranchingChain(self._detect_risk, self._crisis_chain, self._rag_chain)
 
         self.summarize_prompt_template = ChatPromptTemplate.from_template(
@@ -329,7 +346,7 @@ class RagOrchestrator(Orchestrator):
     def _get_combined_retriever(self) -> BaseRetriever:
         logging.info("Initializing combined retriever with EnsembleRetriever for multiple namespaces.")
 
-        retriever_k = 2  # Number of documents to fetch from each individual retriever
+        retriever_k = 2
 
         all_dbs = [
             self.theory_db,
@@ -375,13 +392,10 @@ class RagOrchestrator(Orchestrator):
     async def summarize_session(self, session_id: str) -> str:
         logging.info(f"Attempting to summarize session data for session_id: '{session_id}'")
 
-        # Retrieve documents from the session_data namespace using metadata filter
-        # Assuming documents in 'session_data' have 'session_id' in their metadata.
-        # We query for more documents (e.g., k=50) to get a good chunk of the session.
         try:
             session_docs: List[Document] = self.session_data_db.query(
-                query=f"session {session_id}",  # A generic query, filtering is key
-                k=50,  # Retrieve up to 50 chunks for the session
+                query=f"session {session_id}",
+                k=50,
                 metadata_filter={"session_id": session_id},
             )
         except Exception as e:
@@ -394,19 +408,14 @@ class RagOrchestrator(Orchestrator):
             )
             return f"No data found to summarize for session {session_id}."
 
-        # Use the existing _summarize_docs_with_chain helper
         summary = await self._summarize_docs_with_chain(session_docs)
         return summary
 
     async def _summarize_docs_with_chain(self, docs: List[Document]) -> str:
         if not docs:
             return "No documents provided for summarization."
-        # The documents might be in chronological order from Chroma if IDs are structured that way,
-        # but it's not guaranteed. For summarization, the order of chunks might matter.
-        # For now, we'll combine them as retrieved.
         combined_text = "\n\n".join([doc.page_content for doc in docs])
 
-        # Log a snippet of the text being summarized for debugging
         snippet_length = 500
         text_snippet = combined_text[:snippet_length] + "..." if len(combined_text) > snippet_length else combined_text
         logging.info(
