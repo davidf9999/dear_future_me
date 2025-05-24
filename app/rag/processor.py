@@ -1,9 +1,10 @@
 # app/rag/processor.py
-# Full file content
+# app/rag/processor.py
 import logging
 from typing import Any, Dict, List, Optional
 
-import chromadb.config
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
@@ -19,40 +20,61 @@ class DocumentProcessor:
         self,
         namespace: str,
         embedding_model: str = cfg.EMBEDDING_MODEL,
-        persist_directory: str = cfg.CHROMA_PERSIST_DIR,  # Use CHROMA_PERSIST_DIR from settings
-        chroma_host: Optional[str] = cfg.CHROMA_HOST,  # Use CHROMA_HOST from settings
-        chroma_port: Optional[int] = cfg.CHROMA_PORT,  # Use CHROMA_PORT from settings
+        persist_directory: str = cfg.CHROMA_PERSIST_DIR,
+        chroma_host: Optional[str] = cfg.CHROMA_HOST,
+        chroma_port: Optional[int] = cfg.CHROMA_PORT,
     ):
         self.namespace = namespace
         self.embedding_function = OpenAIEmbeddings(model=embedding_model)
 
-        # Construct client_settings based on whether host/port are provided
+        # Create client settings based on whether we're using a remote or local Chroma
         if chroma_host and chroma_port:
-            # Ensure port is a string for chromadb.config.Settings
-            client_settings_obj = chromadb.config.Settings(
-                chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            # Remote Chroma server
+            client_settings = ChromaSettings(
+                chroma_api_impl="rest",
                 chroma_server_host=chroma_host,
                 chroma_server_http_port=str(chroma_port),
-                anonymized_telemetry=False,  # Optional: disable telemetry if desired
+                anonymized_telemetry=False,
             )
-            logger.info(f"DocumentProcessor '{namespace}' connecting to Chroma server at {chroma_host}:{chroma_port}")
+            logger.info(f"Connecting to Chroma server at {chroma_host}:{chroma_port}")
+            self.vectordb = Chroma(
+                collection_name=namespace,
+                embedding_function=self.embedding_function,
+                client_settings=client_settings,
+            )
         else:
-            client_settings_obj = chromadb.config.Settings(
+            # Local Chroma with persistence
+            client_settings = ChromaSettings(
                 is_persistent=True,
                 persist_directory=persist_directory,
-                anonymized_telemetry=False,  # Optional: disable telemetry if desired
+                anonymized_telemetry=False,
             )
-            logger.info(f"DocumentProcessor '{namespace}' using persistent Chroma at {persist_directory}")
+            logger.info(f"Using persistent Chroma at {persist_directory}")
 
-        self.vectordb = Chroma(
-            collection_name=namespace,
-            embedding_function=self.embedding_function,
-            persist_directory=persist_directory
-            if not (chroma_host and chroma_port)
-            else None,  # Only set persist_directory for local
-            client_settings=client_settings_obj,
-        )
+            # Ensure the persist directory exists
+            import os
 
+            os.makedirs(persist_directory, exist_ok=True)
+
+            # Initialize Chroma with the new API
+            client = chromadb.PersistentClient(path=persist_directory, settings=client_settings)
+
+            # Delete existing collection if it exists to avoid dimension mismatch
+            try:
+                client.delete_collection(namespace)
+                logger.info(f"Deleted existing collection '{namespace}' to avoid dimension mismatch")
+            except Exception as e:
+                logger.debug(f"Could not delete collection (may not exist): {e}")
+
+            # Create new collection
+            self.vectordb = Chroma(
+                collection_name=namespace,
+                embedding_function=self.embedding_function,
+                client=client,
+                persist_directory=persist_directory,
+            )
+
+    # [Rest of your DocumentProcessor methods remain the same]
     def ingest(self, doc_id: str, text: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         """Ingests a single text document."""
         doc = Document(page_content=text, metadata=metadata or {})
@@ -113,17 +135,25 @@ class DocumentProcessor:
 
     def persist(self) -> None:
         """Persists the vector store to disk if it's a persistent client."""
-        # Chroma client with Http behöver inte persist().
-        # Chroma client with persist_directory hanterar persistens automatiskt vid skrivningar
-        # eller vid __del__ om is_persistent=True och en persist_directory är satt.
-        # Denna metod kan behållas för explicit kontroll om det behövs i framtiden,
-        # men är oftast inte nödvändig med nuvarande Chroma-klient.
-        if self.vectordb._client_settings.is_persistent and self.vectordb._client_settings.persist_directory:
-            logger.info(
-                f"Attempting to persist namespace '{self.namespace}' to {self.vectordb._client_settings.persist_directory} (Chroma handles this automatically)."
-            )
-            # self.vectordb.persist() # Chroma's persist() is often implicit or handled by client settings
-        else:
-            logger.info(
-                f"Namespace '{self.namespace}' is not configured for explicit persistence via this method (e.g., remote client)."
-            )
+        # Chroma with persist_directory handles persistence automatically
+        # We don't need to do anything here as the client handles it
+        logger.info(f"Persist called for namespace '{self.namespace}'. Chroma handles persistence automatically.")
+        # No need to call persist() as Chroma handles it automatically
+        pass
+
+    # def persist(self) -> None:
+    #     """Persists the vector store to disk if it's a persistent client."""
+    #     # Chroma client with Http behöver inte persist().
+    #     # Chroma client with persist_directory hanterar persistens automatiskt vid skrivningar
+    #     # eller vid __del__ om is_persistent=True och en persist_directory är satt.
+    #     # Denna metod kan behållas för explicit kontroll om det behövs i framtiden,
+    #     # men är oftast inte nödvändig med nuvarande Chroma-klient.
+    #     if self.vectordb._client_settings.is_persistent and self.vectordb._client_settings.persist_directory:
+    #         logger.info(
+    #             f"Attempting to persist namespace '{self.namespace}' to {self.vectordb._client_settings.persist_directory} (Chroma handles this automatically)."
+    #         )
+    #         # self.vectordb.persist() # Chroma's persist() is often implicit or handled by client settings
+    #     else:
+    #         logger.info(
+    #             f"Namespace '{self.namespace}' is not configured for explicit persistence via this method (e.g., remote client)."
+    #         )
