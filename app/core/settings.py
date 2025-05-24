@@ -27,8 +27,31 @@ class Settings(BaseSettings):
     RUN_ALEMBIC_ON_STARTUP: bool = os.getenv("RUN_ALEMBIC_ON_STARTUP", "true").lower() == "true"
 
     # Database settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+    SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "data/dev/database.db")
     DEBUG_SQL: bool = os.getenv("DEBUG_SQL", "false").lower() == "true"
+    
+    # Allow DATABASE_URL to be set directly for backward compatibility
+    DATABASE_URL: str | None = os.getenv("DATABASE_URL")
+    
+    @property
+    def database_url(self) -> str:
+        """Construct the database URL from SQLITE_DB_PATH if not explicitly set."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+            
+        # Ensure the path is absolute and normalized
+        db_path = os.path.abspath(os.path.join(os.getcwd(), self.SQLITE_DB_PATH))
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # Return SQLAlchemy URL for SQLite
+        return f"sqlite+aiosqlite:///{db_path}"
+    
+    # Alias for backward compatibility
+    @property
+    def DATABASE_URL(self) -> str:
+        """Alias for database_url for backward compatibility."""
+        return self.database_url
+    
     # For asyncpg: "postgresql+asyncpg://user:password@host:port/dbname"
 
     # JWT settings

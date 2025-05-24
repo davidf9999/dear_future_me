@@ -9,7 +9,8 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG_SQL)
+# Use the database_url property which handles both direct DATABASE_URL and SQLITE_DB_PATH
+engine = create_async_engine(settings.database_url, echo=settings.DEBUG_SQL)
 
 # expire_on_commit=False will prevent attributes from being expired
 # after commit.

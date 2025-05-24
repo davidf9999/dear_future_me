@@ -21,6 +21,9 @@ eggs/
 *.egg-info/
 *.egg
 *.whl
+*.deb
+*.rpm
+*.snap
 
 # Installer logs
 pip-log.txt
