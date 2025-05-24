@@ -1,8 +1,18 @@
 import asyncio
 import json  # or csv
+import os
+import subprocess
 import uuid
+import sys # For exiting
 from pathlib import Path
 
+# Add project root to sys.path to allow for absolute imports from 'app'
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -11,6 +21,41 @@ from app.db.session import (
     get_async_session_context,  # Assuming you have 'engine' for create_all
 )
 
+
+def get_current_git_branch() -> str | None:
+    """Gets the current Git branch name."""
+    try:
+        process = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).parent.parent,  # Run git command from project root
+        )
+        return process.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"Error getting git branch: {e}. Not a git repository or git command failed.")
+        return None
+    except FileNotFoundError:
+        print("Error: git command not found. Is git installed and in your PATH?")
+        return None
+
+
+def load_environment_settings():
+    """Loads .env files based on the current git branch."""
+    project_root = Path(__file__).parent.parent
+    load_dotenv(dotenv_path=project_root / ".env")  # Load base .env first
+
+    branch = get_current_git_branch()
+    if branch == "main":
+        load_dotenv(dotenv_path=project_root / ".env.prod", override=True)
+        print("Loaded .env.prod settings.")
+    elif branch == "dev":
+        load_dotenv(dotenv_path=project_root / ".env.dev", override=True)
+        print("Loaded .env.dev settings.")
+    else:
+        print(f"Error: Unsupported git branch '{branch}'. Please run this script from 'main' or 'dev' branch.")
+        sys.exit(1)
 # If you need to create users with FastAPI-Users (e.g., for hashed passwords)
 # This setup is a bit more involved as get_user_manager needs a request-like object
 # or you might need to adapt user creation.
@@ -101,6 +146,9 @@ async def seed_user_data(db: AsyncSession, user_data: dict):
 
 
 async def main():
+    # Load environment-specific settings before doing anything else
+    load_environment_settings()
+
     # await create_db_and_tables() # Ensure tables exist
 
     # Example: Load from a JSONL file
@@ -130,7 +178,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Ensure your DB_URL is set in environment or config for get_async_session_context
-    # Example: os.environ["DB_URL"] = "sqlite+aiosqlite:///./test_seed.db"
+    # The environment loading is now handled at the start of main()
+    # This ensures that any subsequent imports or function calls (like get_async_session_context
+    # which might rely on app.core.settings.get_settings()) use the correct environment.
+    # Ensure your DATABASE_URL is set in environment or config for get_async_session_context
+    # Example: os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_seed.db"
     # Make sure your Alembic migrations have run against this DB first.
     asyncio.run(main())
