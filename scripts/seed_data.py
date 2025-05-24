@@ -1,187 +1,190 @@
+# scripts/seed_data.py
 import asyncio
-import json  # or csv
+import json
 import os
-import subprocess
-import uuid
-import sys # For exiting
+import sys
 from pathlib import Path
-
-# Add project root to sys.path to allow for absolute imports from 'app'
-project_root = Path(__file__).resolve().parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.auth.models import SafetyPlanTable, UserProfileTable, UserTable
-from app.db.session import (
-    get_async_session_context,  # Assuming you have 'engine' for create_all
+# Determine the project root directory and add it to sys.path
+# This allows the script to be run from any location and still find the 'app' module.
+# This should be done before attempting to import from 'app'.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.auth.models import SafetyPlanTable, UserProfileTable, UserTable  # noqa: E402
+from app.auth.security import get_password_hash  # noqa: E402
+from app.core.settings import get_settings  # noqa: E402
+from app.db.session import (  # noqa: E402
+    get_async_session_context,
+    get_engine,
 )
 
 
-def get_current_git_branch() -> str | None:
-    """Gets the current Git branch name."""
-    try:
-        process = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=Path(__file__).parent.parent,  # Run git command from project root
-        )
-        return process.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        print(f"Error getting git branch: {e}. Not a git repository or git command failed.")
-        return None
-    except FileNotFoundError:
-        print("Error: git command not found. Is git installed and in your PATH?")
-        return None
+async def seed_users(session: AsyncSession, users_data: list):
+    """Seeds user data into the UserTable."""
+    print("Seeding users...")
+    for user_dict in users_data:
+        # Check if user already exists
+        existing_user_stmt = select(UserTable).where(UserTable.email == user_dict["email"])
+        existing_user_result = await session.execute(existing_user_stmt)
+        if existing_user_result.scalars().first():
+            print(f"User {user_dict['email']} already exists, skipping.")
+            continue
+
+        hashed_password = get_password_hash(user_dict.pop("password"))
+        user = UserTable(**user_dict, hashed_password=hashed_password)
+        session.add(user)
+        print(f"  Added user: {user.email}")
+    await session.commit()
+    print("User seeding complete.")
 
 
-def load_environment_settings():
-    """Loads .env files based on the current git branch."""
-    project_root = Path(__file__).parent.parent
-    load_dotenv(dotenv_path=project_root / ".env")  # Load base .env first
+async def seed_user_profiles(session: AsyncSession, profiles_data: list):
+    """Seeds user profile data into the UserProfileTable."""
+    print("Seeding user profiles...")
+    for profile_dict in profiles_data:
+        user_email = profile_dict.pop("user_email") # Assuming JSONL has user_email to link
 
-    branch = get_current_git_branch()
-    if branch == "main":
-        load_dotenv(dotenv_path=project_root / ".env.prod", override=True)
-        print("Loaded .env.prod settings.")
-    elif branch == "dev":
-        load_dotenv(dotenv_path=project_root / ".env.dev", override=True)
-        print("Loaded .env.dev settings.")
-    else:
-        print(f"Error: Unsupported git branch '{branch}'. Please run this script from 'main' or 'dev' branch.")
-        sys.exit(1)
-# If you need to create users with FastAPI-Users (e.g., for hashed passwords)
-# This setup is a bit more involved as get_user_manager needs a request-like object
-# or you might need to adapt user creation.
-# For simple seeding without password hashing concerns, direct DB insertion is easier.
+        # Find the user_id for the given email
+        user_stmt = select(UserTable.id).where(UserTable.email == user_email)
+        user_result = await session.execute(user_stmt)
+        user_id = user_result.scalars().first()
+
+        if not user_id:
+            print(f"  Warning: User with email '{user_email}' not found for profile. Skipping profile: {profile_dict.get('name', 'N/A')}")
+            continue
+
+        # Check if profile for this user_id already exists
+        existing_profile_stmt = select(UserProfileTable).where(UserProfileTable.user_id == user_id)
+        existing_profile_result = await session.execute(existing_profile_stmt)
+        if existing_profile_result.scalars().first():
+            print(f"  Profile for user_id {user_id} (email: {user_email}) already exists. Skipping.")
+            continue
+        
+        profile = UserProfileTable(user_id=user_id, **profile_dict)
+        session.add(profile)
+        print(f"  Added profile for user_id: {user_id} (email: {user_email})")
+    await session.commit()
+    print("User profile seeding complete.")
 
 
-async def create_db_and_tables():
-    # This is usually handled by Alembic, but for a fresh seed, you might ensure tables exist
-    # Or rely on your test setup / Alembic to have created them.
-    # from app.auth.models import Base
-    # async with engine.begin() as conn:
-    #     await conn.run_sync(Base.metadata.create_all)
-    pass
+async def seed_safety_plans(session: AsyncSession, plans_data: list):
+    """Seeds safety plan data into the SafetyPlanTable."""
+    print("Seeding safety plans...")
+    for plan_dict in plans_data:
+        user_email = plan_dict.pop("user_email") # Assuming JSONL has user_email to link
 
+        # Find the user_id for the given email
+        user_stmt = select(UserTable.id).where(UserTable.email == user_email)
+        user_result = await session.execute(user_stmt)
+        user_id = user_result.scalars().first()
 
-async def seed_user_data(db: AsyncSession, user_data: dict):
-    # Check if user exists
-    user_email = user_data.get("email")
-    if not user_email:
-        print(f"Skipping record, missing email: {user_data.get('name')}")
-        return
+        if not user_id:
+            print(f"  Warning: User with email '{user_email}' not found for safety plan. Skipping plan for: {user_email}")
+            continue
+        
+        # Check if plan for this user_id already exists (simple check, might need more sophisticated logic)
+        existing_plan_stmt = select(SafetyPlanTable).where(SafetyPlanTable.user_id == user_id)
+        existing_plan_result = await session.execute(existing_plan_stmt)
+        if existing_plan_result.scalars().first(): # This assumes one plan per user for simplicity
+            print(f"  Safety plan for user_id {user_id} (email: {user_email}) already exists. Skipping.")
+            continue
 
-    stmt = select(UserTable).where(UserTable.email == user_email)
-    result = await db.execute(stmt)
-    db_user = result.scalar_one_or_none()
-
-    if not db_user:
-        # Create UserTable entry
-        # For FastAPI-Users, password hashing is important.
-        # This part might need to use UserManager if you want proper user creation.
-        # For a simple seed, you might insert directly if you handle passwords appropriately (e.g. placeholder)
-        # or if authentication isn't the focus of the seed.
-
-        # Simplified direct insertion (use with caution for passwords)
-        new_user_id = uuid.uuid4()
-        db_user = UserTable(
-            id=new_user_id,
-            email=user_email,
-            hashed_password=user_data.get("hashed_password", "seeded_placeholder_hash"),  # NOT SECURE FOR REAL USERS
-            is_active=user_data.get("is_active", True),
-            is_verified=user_data.get("is_verified", True),
-            is_superuser=user_data.get("is_superuser", False),
-            first_name=user_data.get("first_name"),
-            last_name=user_data.get("last_name"),
-        )
-        db.add(db_user)
-        await db.flush()  # Get the ID if auto-generated by DB, though we use UUID
-        print(f"Created user: {user_email}")
-    else:
-        print(f"User already exists: {user_email}")
-        # Optionally update existing user fields if needed
-        # db_user.first_name = user_data.get("first_name", db_user.first_name)
-        # ...
-
-    # Create/Update UserProfileTable
-    profile_data = user_data.get("profile")
-    if profile_data:
-        stmt_profile = select(UserProfileTable).where(UserProfileTable.user_id == db_user.id)
-        result_profile = await db.execute(stmt_profile)
-        db_profile = result_profile.scalar_one_or_none()
-
-        if not db_profile:
-            db_profile = UserProfileTable(user_id=db_user.id, **profile_data)
-            db.add(db_profile)
-            print(f"Created profile for user: {user_email}")
-        else:
-            # Update existing profile
-            for key, value in profile_data.items():
-                setattr(db_profile, key, value)
-            print(f"Updated profile for user: {user_email}")
-
-    # Create/Update SafetyPlanTable
-    safety_plan_data = user_data.get("safety_plan")
-    if safety_plan_data:
-        stmt_safety_plan = select(SafetyPlanTable).where(SafetyPlanTable.user_id == db_user.id)
-        result_safety_plan = await db.execute(stmt_safety_plan)
-        db_safety_plan = result_safety_plan.scalar_one_or_none()
-
-        if not db_safety_plan:
-            db_safety_plan = SafetyPlanTable(user_id=db_user.id, **safety_plan_data)
-            db.add(db_safety_plan)
-            print(f"Created safety plan for user: {user_email}")
-        else:
-            # Update existing safety plan
-            for key, value in safety_plan_data.items():
-                setattr(db_safety_plan, key, value)
-            print(f"Updated safety plan for user: {user_email}")
+        plan = SafetyPlanTable(user_id=user_id, **plan_dict)
+        session.add(plan)
+        print(f"  Added safety plan for user_id: {user_id} (email: {user_email})")
+    await session.commit()
+    print("Safety plan seeding complete.")
 
 
 async def main():
-    # Load environment-specific settings before doing anything else
-    load_environment_settings()
+    """Main function to load data from JSONL files and seed the database."""
+    settings = get_settings()
 
-    # await create_db_and_tables() # Ensure tables exist
+    # Determine which .env file to load based on an argument or default
+    # For simplicity, let's assume a 'dev' or 'prod' argument.
+    # If no arg, default to 'dev'.
+    env_type = sys.argv[1] if len(sys.argv) > 1 else "dev"
+    env_file = PROJECT_ROOT / f".env.{env_type}"
 
-    # Example: Load from a JSONL file
-    # each line is a JSON object:
-    # {"email": "user1@example.com", "first_name": "Test", "last_name": "User1",
-    #  "profile": {"name": "Test User1", "gender_identity_pronouns": "they/them", ...},
-    #  "safety_plan": {"step_1_warning_signs": "Feeling down", ...}}
+    if env_file.exists():
+        print(f"Loading environment variables from: {env_file}")
+        load_dotenv(dotenv_path=env_file, override=True)
+    else:
+        print(f"Warning: Environment file {env_file} not found. Using default/existing environment.")
 
-    data_file = Path(__file__).parent.parent / "data" / "seed_users.jsonl"  # Adjust path
+    # Re-fetch settings after .env might have been loaded
+    # This is important if DATABASE_URL is in the .env file
+    settings = get_settings()
+    print(f"Using DATABASE_URL: {settings.DATABASE_URL} for seeding.")
 
-    if not data_file.exists():
-        print(f"Data file not found: {data_file}")
-        return
 
-    async with get_async_session_context() as db:
-        with open(data_file, "r") as f:
+    # Path to the directory containing JSONL files
+    # Assumes JSONL files are in PROJECT_ROOT/RDB_demo_data/jsonl/
+    jsonl_dir = PROJECT_ROOT / "RDB_demo_data" / "jsonl"
+
+    users_jsonl_path = jsonl_dir / "users.jsonl"
+    profiles_jsonl_path = jsonl_dir / "user_profiles.jsonl"
+    safety_plans_jsonl_path = jsonl_dir / "safety_plans.jsonl"
+
+    # Load data from JSONL files
+    users_data = []
+    if users_jsonl_path.exists():
+        with open(users_jsonl_path, 'r', encoding='utf-8') as f:
             for line in f:
-                try:
-                    user_data_item = json.loads(line)
-                    await seed_user_data(db, user_data_item)
-                except json.JSONDecodeError as e:
-                    print(f"Skipping invalid JSON line: {line.strip()} - Error: {e}")
-                except Exception as e:
-                    print(f"Error processing line: {line.strip()} - Error: {e}")
-        await db.commit()
-    print("Data seeding complete.")
+                users_data.append(json.loads(line))
+    else:
+        print(f"Warning: Users JSONL file not found at {users_jsonl_path}")
 
+    profiles_data = []
+    if profiles_jsonl_path.exists():
+        with open(profiles_jsonl_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                profiles_data.append(json.loads(line))
+    else:
+        print(f"Warning: User profiles JSONL file not found at {profiles_jsonl_path}")
+
+    safety_plans_data = []
+    if safety_plans_jsonl_path.exists():
+        with open(safety_plans_jsonl_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                safety_plans_data.append(json.loads(line))
+    else:
+        print(f"Warning: Safety plans JSONL file not found at {safety_plans_jsonl_path}")
+
+    # Get an async session
+    # The get_async_session_context should use the engine configured by get_settings()
+    engine = get_engine() # Get the engine configured by settings
+    
+    # Optional: Create tables if they don't exist.
+    # This is useful if running seed script against a fresh DB without migrations.
+    # However, it's generally better to run Alembic migrations first.
+    # from app.auth.models import Base # Already imported
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.create_all)
+    # print("Ensured all tables are created (if they didn't exist).")
+
+
+    async with get_async_session_context() as session: # Use the context manager
+        if users_data:
+            await seed_users(session, users_data)
+        if profiles_data:
+            await seed_user_profiles(session, profiles_data)
+        if safety_plans_data:
+            await seed_safety_plans(session, safety_plans_data)
+    
+    await engine.dispose() # Dispose the engine when done
+    print("Seeding process finished.")
 
 if __name__ == "__main__":
-    # The environment loading is now handled at the start of main()
-    # This ensures that any subsequent imports or function calls (like get_async_session_context
-    # which might rely on app.core.settings.get_settings()) use the correct environment.
-    # Ensure your DATABASE_URL is set in environment or config for get_async_session_context
-    # Example: os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_seed.db"
-    # Make sure your Alembic migrations have run against this DB first.
-    asyncio.run(main())
+    print(f"Running seed_data.py with arguments: {sys.argv}")
+    if len(sys.argv) > 1 and sys.argv[1] in ["dev", "prod"]:
+        asyncio.run(main())
+    else:
+        print("Usage: python scripts/seed_data.py <dev|prod>")
+        print("Example: python scripts/seed_data.py dev")
