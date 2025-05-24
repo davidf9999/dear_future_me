@@ -3,11 +3,25 @@ import asyncio
 import os
 import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+
+# Load development environment variables if they exist
+dev_env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env.dev"
+if dev_env_path.exists():
+    load_dotenv(dotenv_path=dev_env_path, override=True)
 
 # Add the project root directory to sys.path
 # This allows Alembic to find the 'app' module
@@ -82,21 +96,31 @@ async def run_migrations_online() -> None:
 
     In this scenario we need to create an Engine
     and associate a connection with the context.
-
     """
     connectable = config.attributes.get("connection", None)
-    # print(f"DEBUG (run_migrations_online): Connection from config.attributes: {connectable}")
 
     if connectable is None:
-        # print("DEBUG (run_migrations_online): No connection in attributes. Creating new engine for CLI mode.")
+        # Get the database URL from the config
         db_url = config.get_main_option("sqlalchemy.url")
-        if not db_url or db_url == "env:DATABASE_URL" or "%(DATABASE_URL)s" in db_url:
-            resolved_env_url = os.getenv("DATABASE_URL")
-            if resolved_env_url:
-                db_url = resolved_env_url
-            else:
-                raise ValueError("Could not resolve DATABASE_URL for Alembic CLI mode.")
+        
+        # If the URL contains environment variable references, resolve them
+        if db_url and db_url.startswith('${') and db_url.endswith('}'):
+            env_var = db_url[2:-1]  # Extract the environment variable name
+            db_url = os.getenv(env_var)
+            if not db_url:
+                raise ValueError(f"Environment variable {env_var} not found")
+        elif not db_url or "%(DATABASE_URL)s" in db_url:
+            # Fallback to DATABASE_URL environment variable
+            db_url = os.getenv("DATABASE_URL")
+            if not db_url:
+                raise ValueError(
+                    "No database URL configured. "
+                    "Please set DATABASE_URL in your environment or in .env/.env.dev"
+                )
 
+        print(f"Using database URL: {db_url}")
+        
+        # Create the engine
         engine = async_engine_from_config(
             {"sqlalchemy.url": db_url},
             prefix="sqlalchemy.",
